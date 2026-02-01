@@ -1,7 +1,7 @@
 # OpenClaw Docker Image for Umbrel
 # Self-hosted personal AI assistant with web-based setup
 
-FROM node:22-bookworm-slim
+FROM node:22-trixie-slim
 
 # Install brew requirements
 RUN apt-get update && apt-get install -y \
