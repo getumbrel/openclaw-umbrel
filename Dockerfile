@@ -24,7 +24,9 @@ COPY --chown=node:node setup-ui/server.cjs /app/setup-server.cjs
 ENV NODE_ENV=production
 ENV HOME=/home/node
 ENV HOMEBREW_PREFIX=/home/node/.linuxbrew
-ENV PATH="${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${PATH}"
+# Redirect future npm global installs to persistent volume (prepend to PATH so they take priority)
+ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
+ENV PATH="/home/node/.npm-global/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${PATH}"
 ENV OPENCLAW_DATA_DIR=/home/node/.openclaw
 ENV OPENCLAW_GATEWAY_HOST=0.0.0.0
 ENV OPENCLAW_GATEWAY_PORT=18789
