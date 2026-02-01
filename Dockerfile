@@ -3,7 +3,7 @@
 
 FROM node:22-bookworm-slim
 
-# Install runtime dependencies and brew requirements
+# Installbrew requirements
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
