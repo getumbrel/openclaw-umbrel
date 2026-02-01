@@ -3,44 +3,29 @@
 
 FROM node:22-trixie-slim
 
-# Install brew requirements
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
-    tini \
-    git \
-    build-essential \
-    procps \
-    file \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies (git required for npm, others for Homebrew)
+RUN apt-get update && apt-get install -y ca-certificates curl git build-essential procps file && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw globally from npm
 RUN npm install -g openclaw@2026.1.30
 
-# Copy setup UI server
-COPY --chown=node:node setup-ui/server.cjs /app/setup-server.cjs
+# Redirect future npm global installs to persistent volume
+ENV NPM_CONFIG_PREFIX=/data/.npm-global
+ENV HOMEBREW_PREFIX=/data/.linuxbrew
 
-# Set environment variables
-ENV NODE_ENV=production
-ENV HOME=/home/node
-ENV HOMEBREW_PREFIX=/home/node/.linuxbrew
-# Redirect future npm global installs to persistent volume (prepend to PATH so they take priority)
-ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
-ENV PATH="/home/node/.npm-global/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${PATH}"
-ENV OPENCLAW_DATA_DIR=/home/node/.openclaw
+# Set environment variables (needed?)
+ENV OPENCLAW_DATA_DIR=/data/.openclaw
 ENV OPENCLAW_GATEWAY_HOST=0.0.0.0
 ENV OPENCLAW_GATEWAY_PORT=18789
 
-WORKDIR /app
-
-# Expose gateway port
-EXPOSE 18789
-
 # Switch to non-root user
 USER node
+ENV HOME=/data
+WORKDIR /data
 
-# Use tini as init system
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# Copy setup UI server
+COPY --chown=node:node setup-ui/server.cjs /app/setup-server.cjs
 
 # Run the setup/proxy server
 CMD ["node", "/app/setup-server.cjs"]
+EXPOSE 18789

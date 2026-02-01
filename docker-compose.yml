@@ -4,7 +4,8 @@ services:
     image: openclaw:latest
     container_name: openclaw
     restart: unless-stopped
+    init: true
     ports:
       - "18789:18789"
     volumes:
-      - $PWD/data:/home/node
+      - $PWD/data:/data

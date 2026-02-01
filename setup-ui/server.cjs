@@ -7,7 +7,7 @@ const { spawn, exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 
-const CONFIG_DIR = process.env.OPENCLAW_DATA_DIR || '/home/node/.openclaw';
+const CONFIG_DIR = process.env.OPENCLAW_DATA_DIR || '/data/.openclaw';
 const CONFIG_FILE = path.join(CONFIG_DIR, 'openclaw.json');
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
 const PORT = parseInt(process.env.SETUP_PORT || '18789');
