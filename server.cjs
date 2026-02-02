@@ -612,8 +612,13 @@ const server = http.createServer((req, res) => {
     return handleApiSetup(req, res);
   }
 
-  // If not configured, show setup UI
+  // If not configured, show setup UI (redirect to root if on another path)
   if (!isConfigured()) {
+    if (req.url !== "/") {
+      res.writeHead(302, { Location: "/" });
+      res.end();
+      return;
+    }
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(getSetupHtml());
     return;
