@@ -474,7 +474,11 @@ function handleApiSetup(req, res) {
         },
         gateway: {
           mode: "local",
+          controlUi: {
+            allowInsecureAuth: true,
+          },
           auth: {
+            mode: "token",
             token: gatewayToken,
           },
         },
