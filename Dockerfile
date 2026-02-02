@@ -3,7 +3,7 @@
 
 FROM node:22-trixie-slim
 
-# Install global deps and give node user sudo access
+# Install global deps
 RUN apt-get update && apt-get install -y sudo ca-certificates curl git build-essential procps file && rm -rf /var/lib/apt/lists/*
 
 # Set home directory
@@ -23,6 +23,12 @@ USER node
 
 # Install brew
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Replace apt/apt-get with script telling openclaw to use brew
+RUN printf '#!/bin/bash\necho "Error: apt is not available. Please use brew instead." >&2\necho "Example: brew install <package>" >&2\nexit 1\n' > /usr/local/bin/use-brew \
+    && chmod +x /usr/local/bin/use-brew \
+    && ln -s /usr/local/bin/use-brew /usr/local/bin/apt \
+    && ln -s /usr/local/bin/use-brew /usr/local/bin/apt-get
 
 # Copy setup UI server
 COPY --chown=node:node server.cjs /app/setup-server.cjs
