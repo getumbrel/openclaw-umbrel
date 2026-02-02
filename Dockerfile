@@ -22,7 +22,6 @@ RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 USER node
 
 # Install brew
-RUN echo clear cache
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # Copy setup UI server
