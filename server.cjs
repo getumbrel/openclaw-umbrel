@@ -17,17 +17,6 @@ const SKELETON_DIR = "/home-skeleton";
 
 let openclawProcess = null;
 
-function readConfig() {
-  try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    }
-  } catch (e) {
-    console.error("Error reading config:", e);
-  }
-  return null;
-}
-
 function readEnv() {
   const env = {};
   try {
