@@ -309,8 +309,8 @@ function getSetupHtml() {
       <div class="form-group">
         <label for="model">Model</label>
         <select id="model" name="model">
-          <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Recommended)</option>
-          <option value="anthropic/claude-opus-4-5">Claude Opus 4.5</option>
+          <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Fast)</option>
+          <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
         </select>
       </div>
 
@@ -345,13 +345,13 @@ function getSetupHtml() {
 
     const models = {
       anthropic: [
-        { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Recommended)' },
-        { value: 'anthropic/claude-opus-4-5', label: 'Claude Opus 4.5' }
+        { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Fast)' },
+        { value: 'anthropic/claude-opus-4-5', label: 'Claude Opus 4.5 (Powerful)' }
       ],
       openai: [
-        { value: 'openai/gpt-5.2-codex', label: 'GPT-5.2 Codex (Recommended)' },
-        { value: 'openai/gpt-5.2', label: 'GPT-5.2' },
-        { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini (Cheaper)' }
+        { value: 'openai/gpt-5.2-codex', label: 'GPT-5.2 Codex (Coding)' },
+        { value: 'openai/gpt-5.2', label: 'GPT-5.2 (Powerful)' },
+        { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini (Cheap)' }
       ]
     };
 
