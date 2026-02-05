@@ -1,4 +1,6 @@
-# docker-openclaw
+# OpenClaw for umbrelOS
+
+<a href="https://apps.umbrel.com/app/openclaw"><img src="https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/openclaw.png" alt="OpenClaw" height="60"></a>&nbsp;&nbsp;&nbsp;<a href="https://apps.umbrel.com/app/openclaw"><img src="https://apps.umbrel.com/badge-dark.svg" alt="badge-dark" height="60"></a>
 
 > A Docker image for running [OpenClaw](https://openclaw.ai) on umbrelOS.
 
