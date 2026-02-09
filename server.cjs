@@ -112,8 +112,24 @@ function isConfigured() {
   return !!(
     env.ANTHROPIC_API_KEY ||
     env.OPENAI_API_KEY ||
+    env.GEMINI_API_KEY ||
+    env.MOONSHOT_API_KEY ||
+    env.MINIMAX_API_KEY ||
+    env.DASHSCOPE_API_KEY ||
+    env.ZAI_API_KEY ||
+    env.VENICE_API_KEY ||
+    env.OLLAMA_API_KEY ||
+    env.OPENROUTER_API_KEY ||
     process.env.ANTHROPIC_API_KEY ||
-    process.env.OPENAI_API_KEY
+    process.env.OPENAI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.MOONSHOT_API_KEY ||
+    process.env.MINIMAX_API_KEY ||
+    process.env.DASHSCOPE_API_KEY ||
+    process.env.ZAI_API_KEY ||
+    process.env.VENICE_API_KEY ||
+    process.env.OLLAMA_API_KEY ||
+    process.env.OPENROUTER_API_KEY
   );
 }
 
@@ -291,14 +307,63 @@ function getSetupHtml() {
 
     <form id="setup-form">
       <div class="form-group">
-        <label for="provider">AI Provider</label>
-        <select id="provider" name="provider">
-          <option value="anthropic">Anthropic (Claude)</option>
-          <option value="openai">OpenAI (GPT)</option>
+        <label for="model">Model</label>
+        <select id="model" name="model">
+          <optgroup label="Anthropic">
+            <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Fast)</option>
+            <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Powerful)</option>
+            <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option value="openai/gpt-5.3-codex">GPT-5.3 Codex (Coding)</option>
+            <option value="openai/gpt-5.2-codex">GPT-5.2 Codex (Coding)</option>
+            <option value="openai/gpt-5.2">GPT-5.2 (Powerful)</option>
+            <option value="openai/gpt-4o-mini">GPT-4o Mini (Cheap)</option>
+          </optgroup>
+          <optgroup label="Google Gemini">
+            <option value="google/gemini-3-pro-preview">Gemini 3 Pro Preview</option>
+            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
+          </optgroup>
+          <optgroup label="Moonshot">
+            <option value="moonshot/kimi-k2.5">Kimi K2.5</option>
+          </optgroup>
+          <optgroup label="Ollama (Local)">
+            <option value="ollama/llama3.2:3b">Llama 3.2 3B</option>
+            <option value="ollama/qwen2.5-coder:7b">Qwen 2.5 Coder 7B</option>
+            <option value="ollama/deepseek-r1:8b">DeepSeek R1 8B</option>
+          </optgroup>
+          <optgroup label="OpenRouter">
+            <option value="openrouter/auto">Auto</option>
+            <option value="openrouter/anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 via OpenRouter</option>
+            <option value="openrouter/openai/gpt-5.3-codex">GPT-5.3 Codex via OpenRouter</option>
+            <option value="openrouter/google/gemini-2.5-pro">Gemini 2.5 Pro via OpenRouter</option>
+            <option value="openrouter/deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
+            <option value="openrouter/meta-llama/llama-4-maverick">Llama 4 Maverick via OpenRouter</option>
+          </optgroup>
+          <optgroup label="MiniMax">
+            <option value="minimax/m2.1">MiniMax M2.1</option>
+            <option value="minimax/m2.1-lightning">MiniMax M2.1 Lightning (Fast)</option>
+          </optgroup>
+          <optgroup label="Qwen (DashScope)">
+            <option value="qwen/qwen3-235b-a22b">Qwen3 235B (Powerful)</option>
+            <option value="qwen/qwen3-32b">Qwen3 32B (Fast)</option>
+            <option value="qwen/qwen-coder-plus">Qwen Coder Plus</option>
+          </optgroup>
+          <optgroup label="Z.AI (GLM)">
+            <option value="zai/glm-4.7">GLM 4.7</option>
+            <option value="zai/glm-4.7-flash">GLM 4.7 Flash (Fast)</option>
+            <option value="zai/glm-4.6">GLM 4.6</option>
+          </optgroup>
+          <optgroup label="Venice AI">
+            <option value="venice/llama-3.3-70b">Llama 3.3 70B</option>
+            <option value="venice/deepseek-v3.2">DeepSeek V3.2</option>
+            <option value="venice/kimi-k2-5">Kimi K2.5 via Venice</option>
+          </optgroup>
         </select>
       </div>
 
-      <div class="form-group">
+      <div class="form-group" id="api-key-group">
         <label for="api-key">API Key</label>
         <input type="password" id="api-key" name="api-key" placeholder="sk-..." required>
         <p class="help-text" id="api-help">
@@ -306,12 +371,10 @@ function getSetupHtml() {
         </p>
       </div>
 
-      <div class="form-group">
-        <label for="model">Model</label>
-        <select id="model" name="model">
-          <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Fast)</option>
-          <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
-        </select>
+      <div class="form-group hidden" id="ollama-endpoint-group">
+        <label for="ollama-endpoint">Ollama Endpoint</label>
+        <input type="text" id="ollama-endpoint" name="ollama-endpoint" value="http://ollama_ollama_1:11434/v1">
+        <p class="help-text">Default works with the Umbrel Ollama app. Change if Ollama runs elsewhere. Pull the models manually.</p>
       </div>
 
       <button type="submit" id="submit-btn">Start OpenClaw</button>
@@ -339,34 +402,45 @@ function getSetupHtml() {
   </div>
 
   <script>
-    const providerSelect = document.getElementById('provider');
     const modelSelect = document.getElementById('model');
     const apiHelp = document.getElementById('api-help');
+    const apiKeyInput = document.getElementById('api-key');
 
-    const models = {
-      anthropic: [
-        { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Fast)' },
-        { value: 'anthropic/claude-opus-4-5', label: 'Claude Opus 4.5 (Powerful)' }
-      ],
-      openai: [
-        { value: 'openai/gpt-5.2-codex', label: 'GPT-5.2 Codex (Coding)' },
-        { value: 'openai/gpt-5.2', label: 'GPT-5.2 (Powerful)' },
-        { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini (Cheap)' }
-      ]
+    const providerHelp = {
+      anthropic: { text: 'Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>', placeholder: 'sk-ant-...' },
+      openai: { text: 'Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>', placeholder: 'sk-...' },
+      google: { text: 'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a>', placeholder: 'AIza...' },
+      moonshot: { text: 'Get your API key from <a href="https://platform.moonshot.cn/" target="_blank">platform.moonshot.cn</a>', placeholder: 'sk-...' },
+      minimax: { text: 'Get your API key from <a href="https://platform.minimaxi.com/" target="_blank">platform.minimaxi.com</a>', placeholder: 'eyJ...' },
+      qwen: { text: 'Get your API key from <a href="https://dashscope.console.aliyun.com/" target="_blank">dashscope.console.aliyun.com</a>', placeholder: 'sk-...' },
+      zai: { text: 'Get your API key from <a href="https://open.bigmodel.cn/" target="_blank">open.bigmodel.cn</a>', placeholder: '' },
+      venice: { text: 'Get your API key from <a href="https://venice.ai/settings" target="_blank">venice.ai/settings</a>', placeholder: '' },
+      openrouter: { text: 'Get your API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a>', placeholder: 'sk-or-...' }
     };
 
-    const helpLinks = {
-      anthropic: 'Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>',
-      openai: 'Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>'
-    };
+    const apiKeyGroup = document.getElementById('api-key-group');
+    const ollamaEndpointGroup = document.getElementById('ollama-endpoint-group');
 
-    providerSelect.addEventListener('change', () => {
-      const provider = providerSelect.value;
-      modelSelect.innerHTML = models[provider]
-        .map(m => \`<option value="\${m.value}">\${m.label}</option>\`)
-        .join('');
-      apiHelp.innerHTML = helpLinks[provider];
-    });
+    function getProvider(modelValue) {
+      if (modelValue.startsWith('openrouter/')) return 'openrouter';
+      return modelValue.split('/')[0];
+    }
+
+    function updateApiHelp() {
+      const provider = getProvider(modelSelect.value);
+      const isOllama = provider === 'ollama';
+      apiKeyGroup.classList.toggle('hidden', isOllama);
+      ollamaEndpointGroup.classList.toggle('hidden', !isOllama);
+      apiKeyInput.required = !isOllama;
+      if (!isOllama) {
+        const info = providerHelp[provider] || providerHelp.openai;
+        apiHelp.innerHTML = info.text;
+        apiKeyInput.placeholder = info.placeholder;
+      }
+    }
+
+    modelSelect.addEventListener('change', updateApiHelp);
+    updateApiHelp();
 
     function toggleOptional() {
       const section = document.getElementById('optional-section');
@@ -390,9 +464,10 @@ function getSetupHtml() {
       success.style.display = 'none';
 
       const data = {
-        provider: providerSelect.value,
+        provider: getProvider(modelSelect.value),
         apiKey: document.getElementById('api-key').value,
         model: modelSelect.value,
+        ollamaEndpoint: document.getElementById('ollama-endpoint').value,
         telegramToken: document.getElementById('telegram-token').value,
         discordToken: document.getElementById('discord-token').value
       };
@@ -440,8 +515,24 @@ function handleApiSetup(req, res) {
       const env = readEnv();
       if (data.provider === "anthropic") {
         env.ANTHROPIC_API_KEY = data.apiKey;
-      } else {
+      } else if (data.provider === "openai") {
         env.OPENAI_API_KEY = data.apiKey;
+      } else if (data.provider === "google") {
+        env.GEMINI_API_KEY = data.apiKey;
+      } else if (data.provider === "moonshot") {
+        env.MOONSHOT_API_KEY = data.apiKey;
+      } else if (data.provider === "minimax") {
+        env.MINIMAX_API_KEY = data.apiKey;
+      } else if (data.provider === "qwen") {
+        env.DASHSCOPE_API_KEY = data.apiKey;
+      } else if (data.provider === "zai") {
+        env.ZAI_API_KEY = data.apiKey;
+      } else if (data.provider === "venice") {
+        env.VENICE_API_KEY = data.apiKey;
+      } else if (data.provider === "ollama") {
+        env.OLLAMA_API_KEY = "ollama-local";
+      } else if (data.provider === "openrouter") {
+        env.OPENROUTER_API_KEY = data.apiKey;
       }
       if (data.telegramToken) env.TELEGRAM_BOT_TOKEN = data.telegramToken;
       if (data.discordToken) env.DISCORD_BOT_TOKEN = data.discordToken;
@@ -468,6 +559,19 @@ function handleApiSetup(req, res) {
             },
           },
         },
+        ...(data.provider === "ollama" ? {
+          models: {
+            mode: "merge",
+            providers: {
+              ollama: {
+                baseUrl: data.ollamaEndpoint || "http://ollama_ollama_1:11434/v1",
+                apiKey: "ollama-local",
+                api: "openai-completions",
+                models: [],
+              },
+            },
+          },
+        } : {}),
         gateway: {
           mode: "local",
           controlUi: {
