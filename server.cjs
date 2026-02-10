@@ -42,11 +42,11 @@ function writeEnv(env) {
       lines.push(`${key}=${value}`);
     }
   }
-  fs.writeFileSync(ENV_FILE, lines.join("\n") + "\n");
+  fs.writeFileSync(ENV_FILE, lines.join("\n") + "\n", { mode: 0o600 });
 }
 
 function writeConfig(config) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 function ensureConfigDir() {
@@ -118,6 +118,11 @@ function isConfigured() {
     env.DASHSCOPE_API_KEY ||
     env.ZAI_API_KEY ||
     env.VENICE_API_KEY ||
+    env.XAI_API_KEY ||
+    env.GROQ_API_KEY ||
+    env.CEREBRAS_API_KEY ||
+    env.MISTRAL_API_KEY ||
+    env.COPILOT_GITHUB_TOKEN ||
     env.OLLAMA_API_KEY ||
     env.OPENROUTER_API_KEY ||
     process.env.ANTHROPIC_API_KEY ||
@@ -128,6 +133,11 @@ function isConfigured() {
     process.env.DASHSCOPE_API_KEY ||
     process.env.ZAI_API_KEY ||
     process.env.VENICE_API_KEY ||
+    process.env.XAI_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.CEREBRAS_API_KEY ||
+    process.env.MISTRAL_API_KEY ||
+    process.env.COPILOT_GITHUB_TOKEN ||
     process.env.OLLAMA_API_KEY ||
     process.env.OPENROUTER_API_KEY
   );
@@ -360,6 +370,24 @@ function getSetupHtml() {
             <option value="venice/deepseek-v3.2">DeepSeek V3.2</option>
             <option value="venice/kimi-k2-5">Kimi K2.5 via Venice</option>
           </optgroup>
+          <optgroup label="xAI">
+            <option value="xai/grok-3">Grok 3</option>
+            <option value="xai/grok-3-mini">Grok 3 Mini (Fast)</option>
+          </optgroup>
+          <optgroup label="Mistral">
+            <option value="mistral/mistral-large-latest">Mistral Large</option>
+            <option value="mistral/codestral-latest">Codestral (Coding)</option>
+          </optgroup>
+          <optgroup label="Groq">
+            <option value="groq/llama-3.3-70b-versatile">Llama 3.3 70B (Fast)</option>
+          </optgroup>
+          <optgroup label="Cerebras">
+            <option value="cerebras/llama-3.3-70b">Llama 3.3 70B (Fast)</option>
+          </optgroup>
+          <optgroup label="GitHub Copilot">
+            <option value="github-copilot/gpt-4o">GPT-4o via Copilot</option>
+            <option value="github-copilot/claude-sonnet-4">Claude Sonnet 4 via Copilot</option>
+          </optgroup>
         </select>
       </div>
 
@@ -415,6 +443,11 @@ function getSetupHtml() {
       qwen: { text: 'Get your API key from <a href="https://dashscope.console.aliyun.com/" target="_blank">dashscope.console.aliyun.com</a>', placeholder: 'sk-...' },
       zai: { text: 'Get your API key from <a href="https://open.bigmodel.cn/" target="_blank">open.bigmodel.cn</a>', placeholder: '' },
       venice: { text: 'Get your API key from <a href="https://venice.ai/settings" target="_blank">venice.ai/settings</a>', placeholder: '' },
+      xai: { text: 'Get your API key from <a href="https://console.x.ai/" target="_blank">console.x.ai</a>', placeholder: 'xai-...' },
+      mistral: { text: 'Get your API key from <a href="https://console.mistral.ai/api-keys" target="_blank">console.mistral.ai</a>', placeholder: '' },
+      groq: { text: 'Get your API key from <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>', placeholder: 'gsk_...' },
+      cerebras: { text: 'Get your API key from <a href="https://cloud.cerebras.ai/" target="_blank">cloud.cerebras.ai</a>', placeholder: 'csk-...' },
+      'github-copilot': { text: 'Use your GitHub token. Run <code>gh auth token</code> or get one from <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>', placeholder: 'ghp_...' },
       openrouter: { text: 'Get your API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a>', placeholder: 'sk-or-...' }
     };
 
@@ -423,6 +456,7 @@ function getSetupHtml() {
 
     function getProvider(modelValue) {
       if (modelValue.startsWith('openrouter/')) return 'openrouter';
+      if (modelValue.startsWith('github-copilot/')) return 'github-copilot';
       return modelValue.split('/')[0];
     }
 
@@ -529,6 +563,16 @@ function handleApiSetup(req, res) {
         env.ZAI_API_KEY = data.apiKey;
       } else if (data.provider === "venice") {
         env.VENICE_API_KEY = data.apiKey;
+      } else if (data.provider === "xai") {
+        env.XAI_API_KEY = data.apiKey;
+      } else if (data.provider === "mistral") {
+        env.MISTRAL_API_KEY = data.apiKey;
+      } else if (data.provider === "groq") {
+        env.GROQ_API_KEY = data.apiKey;
+      } else if (data.provider === "cerebras") {
+        env.CEREBRAS_API_KEY = data.apiKey;
+      } else if (data.provider === "github-copilot") {
+        env.COPILOT_GITHUB_TOKEN = data.apiKey;
       } else if (data.provider === "ollama") {
         env.OLLAMA_API_KEY = "ollama-local";
       } else if (data.provider === "openrouter") {
