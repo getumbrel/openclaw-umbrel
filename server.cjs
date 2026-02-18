@@ -321,6 +321,7 @@ function getSetupHtml() {
         <select id="model" name="model">
           <optgroup label="Anthropic">
             <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Fast)</option>
+            <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6 (Fast)</option>
             <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Powerful)</option>
             <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
           </optgroup>
@@ -346,6 +347,7 @@ function getSetupHtml() {
           <optgroup label="OpenRouter">
             <option value="openrouter/auto">Auto</option>
             <option value="openrouter/anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 via OpenRouter</option>
+            <option value="openrouter/anthropic/claude-sonnet-4-6">Claude Sonnet 4.6 via OpenRouter</option>
             <option value="openrouter/openai/gpt-5.3-codex">GPT-5.3 Codex via OpenRouter</option>
             <option value="openrouter/google/gemini-2.5-pro">Gemini 2.5 Pro via OpenRouter</option>
             <option value="openrouter/deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
