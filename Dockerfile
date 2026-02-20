@@ -4,7 +4,7 @@
 FROM node:22-trixie-slim
 
 # Install global deps
-RUN apt-get update && apt-get install -y sudo ca-certificates curl git build-essential procps file chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential procps file chromium && rm -rf /var/lib/apt/lists/*
 
 # Set home directory
 ENV HOME=/data
