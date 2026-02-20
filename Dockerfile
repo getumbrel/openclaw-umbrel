@@ -17,6 +17,10 @@ RUN npm install -g openclaw@2026.2.17
 # Redirect future npm global installs to persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global
 
+# Install setup server dependencies (node-pty needs build tools, do this as root)
+COPY package.json /app/package.json
+RUN cd /app && npm install --production && chown -R node:node /data
+
 # Switch to non-root user
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 USER node

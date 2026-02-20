@@ -7,6 +7,8 @@ const crypto = require("crypto");
 const { spawn, exec } = require("child_process");
 const { promisify } = require("util");
 const execAsync = promisify(exec);
+const pty = require("/app/node_modules/node-pty");
+const WebSocket = require("/app/node_modules/ws");
 
 const CONFIG_DIR = process.env.OPENCLAW_DATA_DIR || "/data/.openclaw";
 const CONFIG_FILE = path.join(CONFIG_DIR, "openclaw.json");
@@ -16,6 +18,7 @@ const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
 const SKELETON_DIR = "/home-skeleton";
 
 let openclawProcess = null;
+let ptyProcess = null;
 
 function readEnv() {
   const env = {};
@@ -107,7 +110,35 @@ async function initializeHome() {
   }
 }
 
+function readConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    }
+  } catch (e) {
+    console.error("Error reading config:", e);
+  }
+  return null;
+}
+
+function getGatewayToken() {
+  const env = readEnv();
+  if (env.OPENCLAW_GATEWAY_TOKEN) return env.OPENCLAW_GATEWAY_TOKEN;
+  if (process.env.OPENCLAW_GATEWAY_TOKEN) return process.env.OPENCLAW_GATEWAY_TOKEN;
+  const config = readConfig();
+  if (config && config.gateway && config.gateway.auth && config.gateway.auth.token) {
+    return config.gateway.auth.token;
+  }
+  return null;
+}
+
 function isConfigured() {
+  // Check if the CLI onboard has been completed (writes wizard section to config)
+  const config = readConfig();
+  if (config && config.wizard) {
+    return true;
+  }
+
   const env = readEnv();
   return !!(
     env.ANTHROPIC_API_KEY ||
@@ -143,11 +174,44 @@ function isConfigured() {
   );
 }
 
+function reconcileConfig() {
+  const config = readConfig();
+  if (!config) return;
+
+  let changed = false;
+
+  // Ensure allowInsecureAuth is set (needed for Umbrel's auth proxy)
+  if (!config.gateway) config.gateway = {};
+  if (!config.gateway.controlUi) config.gateway.controlUi = {};
+  if (!config.gateway.controlUi.allowInsecureAuth) {
+    config.gateway.controlUi.allowInsecureAuth = true;
+    changed = true;
+    console.log("Patched config: enabled allowInsecureAuth");
+  }
+
+  if (changed) {
+    writeConfig(config);
+  }
+
+  // Sync gateway token to .env so the proxy always has it
+  const token = config.gateway && config.gateway.auth && config.gateway.auth.token;
+  if (token) {
+    const env = readEnv();
+    if (env.OPENCLAW_GATEWAY_TOKEN !== token) {
+      env.OPENCLAW_GATEWAY_TOKEN = token;
+      writeEnv(env);
+      console.log("Synced gateway token to .env");
+    }
+  }
+}
+
 function startOpenclaw() {
   if (openclawProcess) {
     console.log("OpenClaw already running");
     return;
   }
+
+  reconcileConfig();
 
   console.log("Starting OpenClaw gateway...");
   openclawProcess = spawn(
@@ -175,6 +239,7 @@ function getSetupHtml() {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OpenClaw Setup</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -193,6 +258,10 @@ function getSetupHtml() {
       max-width: 500px;
       width: 100%;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      transition: max-width 0.3s ease;
+    }
+    .container.terminal-active {
+      max-width: 820px;
     }
     h1 {
       font-size: 28px;
@@ -305,6 +374,136 @@ function getSetupHtml() {
       border-color: #ccc;
     }
     .hidden { display: none; }
+    .advanced-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #666;
+      user-select: none;
+    }
+    .advanced-toggle input[type="checkbox"] {
+      width: auto;
+      cursor: pointer;
+    }
+    .advanced-warning {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-top: 8px;
+      display: none;
+    }
+    .info-box {
+      background: #f0f4ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 10px;
+      padding: 20px;
+      margin-top: 28px;
+    }
+    .info-box h3 {
+      font-size: 15px;
+      color: #4338ca;
+      margin-bottom: 10px;
+    }
+    .info-box p {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+    .info-box p:last-child {
+      margin-bottom: 0;
+    }
+    .info-box .example-prompt {
+      background: #e0e7ff;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-style: italic;
+      font-size: 13px;
+      color: #3730a3;
+      margin-top: 10px;
+    }
+    .terminal-section {
+      margin-top: 24px;
+      display: none;
+    }
+    .terminal-section h3 {
+      font-size: 15px;
+      color: #475569;
+      margin-bottom: 8px;
+    }
+    .terminal-section p {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+    .terminal-container {
+      background: #1e1e1e;
+      border-radius: 8px;
+      padding: 8px;
+      overflow: hidden;
+    }
+    .terminal-container .xterm {
+      padding: 4px;
+    }
+    .terminal-status {
+      font-size: 12px;
+      color: #666;
+      margin-top: 8px;
+      text-align: center;
+    }
+    .terminal-status.success {
+      color: #059669;
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      display: block;
+    }
+    .terminal-status.error {
+      color: #dc2626;
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      display: block;
+    }
+    .btn-launch-terminal {
+      width: 100%;
+      padding: 12px;
+      background: none;
+      border: 2px dashed #cbd5e1;
+      color: #64748b;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: all 0.2s;
+    }
+    .btn-launch-terminal:hover {
+      border-color: #6366f1;
+      color: #6366f1;
+      background: #f5f3ff;
+    }
+    .divider-or {
+      text-align: center;
+      color: #999;
+      margin: 24px 0;
+      position: relative;
+      font-size: 13px;
+    }
+    .divider-or::before, .divider-or::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 42%;
+      height: 1px;
+      background: #e0e0e0;
+    }
+    .divider-or::before { left: 0; }
+    .divider-or::after { right: 0; }
   </style>
 </head>
 <body>
@@ -326,8 +525,6 @@ function getSetupHtml() {
             <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
           </optgroup>
           <optgroup label="OpenAI">
-            <option value="openai/gpt-5.3-codex">GPT-5.3 Codex (Coding)</option>
-            <option value="openai/gpt-5.2-codex">GPT-5.2 Codex (Coding)</option>
             <option value="openai/gpt-5.2">GPT-5.2 (Powerful)</option>
             <option value="openai/gpt-4o-mini">GPT-4o Mini (Cheap)</option>
           </optgroup>
@@ -336,13 +533,13 @@ function getSetupHtml() {
             <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
             <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
           </optgroup>
-          <optgroup label="Moonshot">
-            <option value="moonshot/kimi-k2.5">Kimi K2.5</option>
+          <optgroup label="xAI">
+            <option value="xai/grok-3">Grok 3</option>
+            <option value="xai/grok-3-mini">Grok 3 Mini (Fast)</option>
           </optgroup>
-          <optgroup label="Ollama (Local)">
-            <option value="ollama/llama3.2:3b">Llama 3.2 3B</option>
-            <option value="ollama/qwen2.5-coder:7b">Qwen 2.5 Coder 7B</option>
-            <option value="ollama/deepseek-r1:8b">DeepSeek R1 8B</option>
+          <optgroup label="Mistral">
+            <option value="mistral/mistral-large-latest">Mistral Large</option>
+            <option value="mistral/codestral-latest">Codestral (Coding)</option>
           </optgroup>
           <optgroup label="OpenRouter">
             <option value="openrouter/auto">Auto</option>
@@ -353,44 +550,51 @@ function getSetupHtml() {
             <option value="openrouter/deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
             <option value="openrouter/meta-llama/llama-4-maverick">Llama 4 Maverick via OpenRouter</option>
           </optgroup>
-          <optgroup label="MiniMax">
+          <optgroup label="Moonshot" class="advanced-provider" style="display:none">
+            <option value="moonshot/kimi-k2.5">Kimi K2.5</option>
+          </optgroup>
+          <optgroup label="MiniMax" class="advanced-provider" style="display:none">
             <option value="minimax/m2.1">MiniMax M2.1</option>
             <option value="minimax/m2.1-lightning">MiniMax M2.1 Lightning (Fast)</option>
           </optgroup>
-          <optgroup label="Qwen (DashScope)">
+          <optgroup label="Qwen (DashScope)" class="advanced-provider" style="display:none">
             <option value="qwen/qwen3-235b-a22b">Qwen3 235B (Powerful)</option>
             <option value="qwen/qwen3-32b">Qwen3 32B (Fast)</option>
             <option value="qwen/qwen-coder-plus">Qwen Coder Plus</option>
           </optgroup>
-          <optgroup label="Z.AI (GLM)">
+          <optgroup label="Z.AI (GLM)" class="advanced-provider" style="display:none">
             <option value="zai/glm-4.7">GLM 4.7</option>
             <option value="zai/glm-4.7-flash">GLM 4.7 Flash (Fast)</option>
             <option value="zai/glm-4.6">GLM 4.6</option>
           </optgroup>
-          <optgroup label="Venice AI">
+          <optgroup label="Venice AI" class="advanced-provider" style="display:none">
             <option value="venice/llama-3.3-70b">Llama 3.3 70B</option>
             <option value="venice/deepseek-v3.2">DeepSeek V3.2</option>
             <option value="venice/kimi-k2-5">Kimi K2.5 via Venice</option>
           </optgroup>
-          <optgroup label="xAI">
-            <option value="xai/grok-3">Grok 3</option>
-            <option value="xai/grok-3-mini">Grok 3 Mini (Fast)</option>
-          </optgroup>
-          <optgroup label="Mistral">
-            <option value="mistral/mistral-large-latest">Mistral Large</option>
-            <option value="mistral/codestral-latest">Codestral (Coding)</option>
-          </optgroup>
-          <optgroup label="Groq">
+          <optgroup label="Groq" class="advanced-provider" style="display:none">
             <option value="groq/llama-3.3-70b-versatile">Llama 3.3 70B (Fast)</option>
           </optgroup>
-          <optgroup label="Cerebras">
+          <optgroup label="Cerebras" class="advanced-provider" style="display:none">
             <option value="cerebras/llama-3.3-70b">Llama 3.3 70B (Fast)</option>
           </optgroup>
-          <optgroup label="GitHub Copilot">
+          <optgroup label="GitHub Copilot" class="advanced-provider" style="display:none">
             <option value="github-copilot/gpt-4o">GPT-4o via Copilot</option>
             <option value="github-copilot/claude-sonnet-4">Claude Sonnet 4 via Copilot</option>
           </optgroup>
+          <optgroup label="Ollama (Local)" class="advanced-provider" style="display:none">
+            <option value="ollama/llama3.2:3b">Llama 3.2 3B</option>
+            <option value="ollama/qwen2.5-coder:7b">Qwen 2.5 Coder 7B</option>
+            <option value="ollama/deepseek-r1:8b">DeepSeek R1 8B</option>
+          </optgroup>
         </select>
+        <label class="advanced-toggle">
+          <input type="checkbox" id="show-advanced" onchange="toggleAdvancedProviders()">
+          Show more providers
+        </label>
+        <div id="advanced-warning" class="advanced-warning">
+          These providers may not be fully tested. For full control, use <code>openclaw onboard</code> via the CLI.
+        </div>
       </div>
 
       <div class="form-group" id="api-key-group">
@@ -429,6 +633,27 @@ function getSetupHtml() {
         </div>
       </div>
     </form>
+
+    <div class="info-box">
+      <h3>Your assistant manages itself</h3>
+      <p>Want a different model or provider later? Just ask in chat. Your assistant can update its own configuration.</p>
+      <div class="example-prompt">&ldquo;Switch to Gemini and let me know what info you need.&rdquo;</div>
+    </div>
+
+    <div class="divider-or">or</div>
+
+    <button type="button" class="btn-launch-terminal" id="btn-launch-terminal" onclick="launchTerminal()">
+      Advanced: Run interactive CLI setup (openclaw onboard)
+    </button>
+
+    <div id="terminal-section" class="terminal-section">
+      <h3>Interactive CLI Setup</h3>
+      <p>Full control over all providers, models, and configuration options.</p>
+      <div class="terminal-container">
+        <div id="terminal"></div>
+      </div>
+      <div id="terminal-status" class="terminal-status"></div>
+    </div>
   </div>
 
   <script>
@@ -472,6 +697,23 @@ function getSetupHtml() {
         const info = providerHelp[provider] || providerHelp.openai;
         apiHelp.innerHTML = info.text;
         apiKeyInput.placeholder = info.placeholder;
+      }
+    }
+
+    function toggleAdvancedProviders() {
+      const show = document.getElementById('show-advanced').checked;
+      const warning = document.getElementById('advanced-warning');
+      document.querySelectorAll('.advanced-provider').forEach(el => {
+        el.style.display = show ? '' : 'none';
+      });
+      warning.style.display = show ? 'block' : 'none';
+      // If an advanced provider was selected and we're hiding them, reset to first option
+      if (!show) {
+        const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+        if (selectedOption && selectedOption.parentElement.classList.contains('advanced-provider')) {
+          modelSelect.selectedIndex = 0;
+          updateApiHelp();
+        }
       }
     }
 
@@ -533,6 +775,99 @@ function getSetupHtml() {
         btn.textContent = 'Start OpenClaw';
       }
     });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script>
+    let term = null;
+    let termWs = null;
+
+    function launchTerminal() {
+      const btn = document.getElementById('btn-launch-terminal');
+      const section = document.getElementById('terminal-section');
+      const status = document.getElementById('terminal-status');
+
+      btn.style.display = 'none';
+      section.style.display = 'block';
+      document.querySelector('.container').classList.add('terminal-active');
+      status.textContent = 'Connecting...';
+      status.className = 'terminal-status';
+
+      // Initialize xterm.js
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+        theme: {
+          background: '#1e1e1e',
+          foreground: '#d4d4d4',
+          cursor: '#d4d4d4',
+        },
+        rows: 24,
+        cols: 80,
+      });
+
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(document.getElementById('terminal'));
+      fitAddon.fit();
+
+      // Connect WebSocket
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      termWs = new WebSocket(proto + '//' + location.host + '/api/terminal');
+
+      termWs.onopen = () => {
+        status.textContent = 'Running openclaw onboard...';
+        // Send initial size
+        termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      };
+
+      termWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'output') {
+            term.write(msg.data);
+          } else if (msg.type === 'exit') {
+            if (msg.code === 0) {
+              status.textContent = 'Setup complete! Reloading...';
+              status.className = 'terminal-status success';
+              setTimeout(() => window.location.reload(), 2000);
+            } else {
+              status.textContent = 'Process exited with code ' + msg.code + '. You can close this and use the form above instead.';
+              status.className = 'terminal-status error';
+            }
+          }
+        } catch (e) {}
+      };
+
+      termWs.onclose = () => {
+        if (!status.textContent.includes('complete') && !status.textContent.includes('exited')) {
+          status.textContent = 'Connection closed.';
+          status.className = 'terminal-status';
+        }
+      };
+
+      termWs.onerror = () => {
+        status.textContent = 'Connection error. Try refreshing the page.';
+        status.className = 'terminal-status error';
+      };
+
+      // Forward keyboard input to PTY
+      term.onData((data) => {
+        if (termWs && termWs.readyState === WebSocket.OPEN) {
+          termWs.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      // Handle resize
+      const resizeObserver = new ResizeObserver(() => {
+        fitAddon.fit();
+        if (termWs && termWs.readyState === WebSocket.OPEN) {
+          termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      });
+      resizeObserver.observe(document.getElementById('terminal'));
+    }
   </script>
 </body>
 </html>`;
@@ -652,9 +987,7 @@ function handleApiSetup(req, res) {
 }
 
 function proxyToOpenclaw(req, res) {
-  const env = readEnv();
-  const token =
-    env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
+  const token = getGatewayToken();
 
   // For the root path, redirect to include token if not present
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -697,9 +1030,7 @@ function proxyToOpenclaw(req, res) {
 
 // Handle WebSocket upgrade requests
 function handleUpgrade(req, socket, head) {
-  const env = readEnv();
-  const token =
-    env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
+  const token = getGatewayToken();
 
   // Connect to OpenClaw gateway
   const proxySocket = net.connect(OPENCLAW_PORT, "127.0.0.1", () => {
@@ -778,8 +1109,84 @@ const server = http.createServer((req, res) => {
   proxyToOpenclaw(req, res);
 });
 
+// WebSocket server for the interactive terminal
+const wss = new WebSocket.Server({ noServer: true });
+
+wss.on("connection", (ws) => {
+  console.log("Terminal WebSocket connected");
+
+  // Kill any existing PTY
+  if (ptyProcess) {
+    try { ptyProcess.kill(); } catch (e) {}
+    ptyProcess = null;
+  }
+
+  // Spawn openclaw onboard in a PTY
+  ptyProcess = pty.spawn("openclaw", ["onboard"], {
+    name: "xterm-256color",
+    cols: 80,
+    rows: 24,
+    cwd: CONFIG_DIR,
+    env: {
+      ...process.env,
+      ...readEnv(),
+      TERM: "xterm-256color",
+    },
+  });
+
+  // PTY output -> WebSocket
+  ptyProcess.onData((data) => {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "output", data }));
+      }
+    } catch (e) {}
+  });
+
+  // PTY exit -> notify client
+  ptyProcess.onExit(({ exitCode }) => {
+    console.log(`openclaw onboard exited with code ${exitCode}`);
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "exit", code: exitCode }));
+      }
+    } catch (e) {}
+    ptyProcess = null;
+  });
+
+  // WebSocket input -> PTY
+  ws.on("message", (msg) => {
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed.type === "input" && ptyProcess) {
+        ptyProcess.write(parsed.data);
+      } else if (parsed.type === "resize" && ptyProcess) {
+        ptyProcess.resize(parsed.cols, parsed.rows);
+      }
+    } catch (e) {}
+  });
+
+  ws.on("close", () => {
+    console.log("Terminal WebSocket closed");
+    if (ptyProcess) {
+      try { ptyProcess.kill(); } catch (e) {}
+      ptyProcess = null;
+    }
+  });
+});
+
 // Handle WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Route /api/terminal to the PTY WebSocket server
+  if (url.pathname === "/api/terminal") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+    return;
+  }
+
   if (!isConfigured()) {
     socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
     return;
