@@ -4,7 +4,7 @@
 FROM node:22-trixie-slim
 
 # Install global deps
-RUN apt-get update && apt-get install -y sudo ca-certificates curl git build-essential procps file chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential procps file chromium && rm -rf /var/lib/apt/lists/*
 
 # Set home directory
 ENV HOME=/data
@@ -12,7 +12,7 @@ WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
 
 # Install OpenClaw globally from npm
-RUN npm install -g openclaw@2026.2.19
+RUN npm install -g openclaw@2026.2.22
 
 # Redirect future npm global installs to persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global

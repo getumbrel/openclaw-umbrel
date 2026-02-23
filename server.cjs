@@ -332,6 +332,7 @@ function getSetupHtml() {
             <option value="openai/gpt-4o-mini">GPT-4o Mini (Cheap)</option>
           </optgroup>
           <optgroup label="Google Gemini">
+            <option value="google/gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
             <option value="google/gemini-3-pro-preview">Gemini 3 Pro Preview</option>
             <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
             <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
