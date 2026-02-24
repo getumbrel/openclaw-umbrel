@@ -626,6 +626,8 @@ function handleApiSetup(req, res) {
             // either accessing over a secure local network or e2e encrypted
             // remotely via tailscale.
             allowInsecureAuth: true,
+            // Disable device auth as this would break access via umbrel.local
+            dangerouslyDisableDeviceAuth: true
           },
           auth: {
             mode: "token",
