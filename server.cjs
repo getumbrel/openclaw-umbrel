@@ -189,6 +189,13 @@ function reconcileConfig() {
     console.log("Patched config: enabled allowInsecureAuth");
   }
 
+  // Disable device auth (would break access via umbrel.local)
+  if (!config.gateway.controlUi.dangerouslyDisableDeviceAuth) {
+    config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+    changed = true;
+    console.log("Patched config: disabled device auth");
+  }
+
   // Disable update checks (updates are managed by Umbrel via Docker image bumps)
   if (!config.update) config.update = {};
   if (config.update.checkOnStart !== false) {
