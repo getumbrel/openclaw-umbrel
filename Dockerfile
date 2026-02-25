@@ -4,7 +4,7 @@
 FROM node:22-trixie-slim
 
 # Install global deps
-RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential procps file chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential python3 procps file chromium && rm -rf /var/lib/apt/lists/*
 
 # Set home directory
 ENV HOME=/data
@@ -12,14 +12,14 @@ WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
 
 # Install OpenClaw globally from npm
-RUN npm install -g openclaw@2026.2.17
+RUN npm install -g openclaw@2026.2.19
 
 # Redirect future npm global installs to persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global
 
 # Install setup server dependencies (node-pty needs build tools, do this as root)
 COPY package.json /app/package.json
-RUN cd /app && npm install --production && chown -R node:node /data
+RUN cd /app && npm install --omit=dev && chown -R node:node /data
 
 # Switch to non-root user
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers

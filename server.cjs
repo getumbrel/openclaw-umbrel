@@ -189,6 +189,14 @@ function reconcileConfig() {
     console.log("Patched config: enabled allowInsecureAuth");
   }
 
+  // Disable update checks (updates are managed by Umbrel via Docker image bumps)
+  if (!config.update) config.update = {};
+  if (config.update.checkOnStart !== false) {
+    config.update.checkOnStart = false;
+    changed = true;
+    console.log("Patched config: disabled update check on start");
+  }
+
   if (changed) {
     writeConfig(config);
   }
@@ -204,6 +212,19 @@ function reconcileConfig() {
     }
   }
 }
+
+// TODO: Add config recovery chain for corrupted/broken configs.
+// This is a common issue in the wild. Proposed approach (be careful not to nuke user files):
+//   1. Run `openclaw doctor --fix` on every boot before starting the gateway
+//   2. If gateway crashes, run `openclaw doctor --fix` again and restart
+//   3. If it crashes again, restore from .bak file (openclaw auto-creates these)
+//   4. If still broken, clear config.wizard (NOT workspace or .env) and show setup page
+//      with a message explaining what happened, letting the user re-run onboard
+//   5. Consider adding a /api/reconfigure endpoint for users stuck with a running
+//      but non-functional gateway (e.g. expired API key)
+// IMPORTANT: Never delete the workspace (/data/.openclaw/workspace) or .env — only
+// reset the wizard state. For steps 3-4, consider showing a choice to the user
+// rather than auto-recovering, since .bak restore could undo intentional config changes.
 
 function startOpenclaw() {
   if (openclawProcess) {
@@ -255,13 +276,9 @@ function getSetupHtml() {
       background: #fff;
       border-radius: 16px;
       padding: 40px;
-      max-width: 500px;
+      max-width: 820px;
       width: 100%;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      transition: max-width 0.3s ease;
-    }
-    .container.terminal-active {
-      max-width: 820px;
     }
     h1 {
       font-size: 28px;
@@ -270,176 +287,33 @@ function getSetupHtml() {
     }
     .subtitle {
       color: #666;
-      margin-bottom: 32px;
-    }
-    .form-group {
       margin-bottom: 24px;
     }
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #333;
-    }
-    input[type="password"], input[type="text"], select {
-      width: 100%;
-      padding: 12px 16px;
-      border: 2px solid #e0e0e0;
+    .terminal-container {
+      background: #1e1e1e;
       border-radius: 8px;
-      font-size: 16px;
-      transition: border-color 0.2s;
+      padding: 8px;
+      overflow: hidden;
     }
-    input:focus, select:focus {
-      outline: none;
-      border-color: #6366f1;
+    .terminal-container .xterm {
+      padding: 4px;
     }
-    .help-text {
-      font-size: 13px;
-      color: #666;
-      margin-top: 6px;
-    }
-    .help-text a {
-      color: #6366f1;
-    }
-    button {
-      width: 100%;
-      padding: 14px;
-      background: #6366f1;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    button:hover {
-      background: #4f46e5;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    .error {
-      background: #fee2e2;
-      color: #dc2626;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      display: none;
-    }
-    .success {
-      background: #d1fae5;
-      color: #059669;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      display: none;
-    }
-    .divider {
-      text-align: center;
-      color: #999;
-      margin: 20px 0;
-      position: relative;
-    }
-    .divider::before, .divider::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 40%;
-      height: 1px;
-      background: #e0e0e0;
-    }
-    .divider::before { left: 0; }
-    .divider::after { right: 0; }
-    .optional-section {
-      background: #f8fafc;
-      padding: 20px;
-      border-radius: 8px;
-      margin-top: 24px;
-    }
-    .optional-section h3 {
-      font-size: 16px;
-      margin-bottom: 16px;
-      color: #475569;
-    }
-    .toggle-optional {
-      background: none;
-      border: 1px solid #e0e0e0;
-      color: #666;
-      margin-top: 16px;
-    }
-    .toggle-optional:hover {
-      background: #f0f0f0;
-      border-color: #ccc;
-    }
-    .hidden { display: none; }
-    .advanced-toggle {
+    .hint {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 8px;
-      cursor: pointer;
+      align-items: flex-start;
+      gap: 10px;
+      background: #fefce8;
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
       font-size: 13px;
-      color: #666;
-      user-select: none;
+      color: #854d0e;
+      line-height: 1.5;
     }
-    .advanced-toggle input[type="checkbox"] {
-      width: auto;
-      cursor: pointer;
-    }
-    .advanced-warning {
-      background: #fef3c7;
-      color: #92400e;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      margin-top: 8px;
-      display: none;
-    }
-    .info-box {
-      background: #f0f4ff;
-      border: 1px solid #c7d2fe;
-      border-radius: 10px;
-      padding: 20px;
-      margin-top: 28px;
-    }
-    .info-box h3 {
-      font-size: 15px;
-      color: #4338ca;
-      margin-bottom: 10px;
-    }
-    .info-box p {
-      font-size: 13px;
-      color: #475569;
-      line-height: 1.6;
-      margin-bottom: 8px;
-    }
-    .info-box p:last-child {
-      margin-bottom: 0;
-    }
-    .info-box .example-prompt {
-      background: #e0e7ff;
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-style: italic;
-      font-size: 13px;
-      color: #3730a3;
-      margin-top: 10px;
-    }
-    .terminal-section {
-      margin-top: 24px;
-      display: none;
-    }
-    .terminal-section h3 {
-      font-size: 15px;
-      color: #475569;
-      margin-bottom: 8px;
-    }
-    .terminal-section p {
-      font-size: 13px;
-      color: #666;
-      margin-bottom: 12px;
+    .hint-icon {
+      flex-shrink: 0;
+      font-size: 16px;
     }
     .terminal-container {
       background: #1e1e1e;
@@ -458,343 +332,95 @@ function getSetupHtml() {
     }
     .terminal-status.success {
       color: #059669;
-      background: none;
-      padding: 0;
-      border-radius: 0;
-      display: block;
     }
     .terminal-status.error {
       color: #dc2626;
-      background: none;
-      padding: 0;
-      border-radius: 0;
-      display: block;
     }
-    .btn-launch-terminal {
-      width: 100%;
-      padding: 12px;
-      background: none;
-      border: 2px dashed #cbd5e1;
-      color: #64748b;
+    .btn-retry {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 10px 24px;
+      background: #6366f1;
+      color: white;
+      border: none;
       border-radius: 8px;
       font-size: 14px;
+      font-weight: 600;
       cursor: pointer;
+    }
+    .btn-retry:hover {
+      background: #4f46e5;
+    }
+    .tip {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: #f0f4ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 10px;
+      padding: 16px 20px;
       margin-top: 20px;
-      transition: all 0.2s;
     }
-    .btn-launch-terminal:hover {
-      border-color: #6366f1;
-      color: #6366f1;
-      background: #f5f3ff;
+    .tip-icon {
+      flex-shrink: 0;
+      font-size: 20px;
     }
-    .divider-or {
-      text-align: center;
-      color: #999;
-      margin: 24px 0;
-      position: relative;
+    .tip-content {
+      font-size: 14px;
+      color: #1e1b4b;
+      line-height: 1.6;
+    }
+    .tip-content strong {
+      color: #4338ca;
+    }
+    .tip-example {
+      display: inline-block;
+      background: #e0e7ff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-style: italic;
       font-size: 13px;
+      color: #3730a3;
+      margin-top: 6px;
     }
-    .divider-or::before, .divider-or::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 42%;
-      height: 1px;
-      background: #e0e0e0;
-    }
-    .divider-or::before { left: 0; }
-    .divider-or::after { right: 0; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Welcome to OpenClaw</h1>
-    <p class="subtitle">Your personal AI assistant. Let's get you set up.</p>
+    <p class="subtitle">Choose your AI provider and paste your API key to get started.</p>
 
-    <div id="error" class="error"></div>
-    <div id="success" class="success"></div>
-
-    <form id="setup-form">
-      <div class="form-group">
-        <label for="model">Model</label>
-        <select id="model" name="model">
-          <optgroup label="Anthropic">
-            <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Fast)</option>
-            <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6 (Fast)</option>
-            <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Powerful)</option>
-            <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
-          </optgroup>
-          <optgroup label="OpenAI">
-            <option value="openai/gpt-5.2">GPT-5.2 (Powerful)</option>
-            <option value="openai/gpt-4o-mini">GPT-4o Mini (Cheap)</option>
-          </optgroup>
-          <optgroup label="Google Gemini">
-            <option value="google/gemini-3-pro-preview">Gemini 3 Pro Preview</option>
-            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
-            <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
-          </optgroup>
-          <optgroup label="xAI">
-            <option value="xai/grok-3">Grok 3</option>
-            <option value="xai/grok-3-mini">Grok 3 Mini (Fast)</option>
-          </optgroup>
-          <optgroup label="Mistral">
-            <option value="mistral/mistral-large-latest">Mistral Large</option>
-            <option value="mistral/codestral-latest">Codestral (Coding)</option>
-          </optgroup>
-          <optgroup label="OpenRouter">
-            <option value="openrouter/auto">Auto</option>
-            <option value="openrouter/anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 via OpenRouter</option>
-            <option value="openrouter/anthropic/claude-sonnet-4-6">Claude Sonnet 4.6 via OpenRouter</option>
-            <option value="openrouter/openai/gpt-5.3-codex">GPT-5.3 Codex via OpenRouter</option>
-            <option value="openrouter/google/gemini-2.5-pro">Gemini 2.5 Pro via OpenRouter</option>
-            <option value="openrouter/deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
-            <option value="openrouter/meta-llama/llama-4-maverick">Llama 4 Maverick via OpenRouter</option>
-          </optgroup>
-          <optgroup label="Moonshot" class="advanced-provider" style="display:none">
-            <option value="moonshot/kimi-k2.5">Kimi K2.5</option>
-          </optgroup>
-          <optgroup label="MiniMax" class="advanced-provider" style="display:none">
-            <option value="minimax/m2.1">MiniMax M2.1</option>
-            <option value="minimax/m2.1-lightning">MiniMax M2.1 Lightning (Fast)</option>
-          </optgroup>
-          <optgroup label="Qwen (DashScope)" class="advanced-provider" style="display:none">
-            <option value="qwen/qwen3-235b-a22b">Qwen3 235B (Powerful)</option>
-            <option value="qwen/qwen3-32b">Qwen3 32B (Fast)</option>
-            <option value="qwen/qwen-coder-plus">Qwen Coder Plus</option>
-          </optgroup>
-          <optgroup label="Z.AI (GLM)" class="advanced-provider" style="display:none">
-            <option value="zai/glm-4.7">GLM 4.7</option>
-            <option value="zai/glm-4.7-flash">GLM 4.7 Flash (Fast)</option>
-            <option value="zai/glm-4.6">GLM 4.6</option>
-          </optgroup>
-          <optgroup label="Venice AI" class="advanced-provider" style="display:none">
-            <option value="venice/llama-3.3-70b">Llama 3.3 70B</option>
-            <option value="venice/deepseek-v3.2">DeepSeek V3.2</option>
-            <option value="venice/kimi-k2-5">Kimi K2.5 via Venice</option>
-          </optgroup>
-          <optgroup label="Groq" class="advanced-provider" style="display:none">
-            <option value="groq/llama-3.3-70b-versatile">Llama 3.3 70B (Fast)</option>
-          </optgroup>
-          <optgroup label="Cerebras" class="advanced-provider" style="display:none">
-            <option value="cerebras/llama-3.3-70b">Llama 3.3 70B (Fast)</option>
-          </optgroup>
-          <optgroup label="GitHub Copilot" class="advanced-provider" style="display:none">
-            <option value="github-copilot/gpt-4o">GPT-4o via Copilot</option>
-            <option value="github-copilot/claude-sonnet-4">Claude Sonnet 4 via Copilot</option>
-          </optgroup>
-          <optgroup label="Ollama (Local)" class="advanced-provider" style="display:none">
-            <option value="ollama/llama3.2:3b">Llama 3.2 3B</option>
-            <option value="ollama/qwen2.5-coder:7b">Qwen 2.5 Coder 7B</option>
-            <option value="ollama/deepseek-r1:8b">DeepSeek R1 8B</option>
-          </optgroup>
-        </select>
-        <label class="advanced-toggle">
-          <input type="checkbox" id="show-advanced" onchange="toggleAdvancedProviders()">
-          Show more providers
-        </label>
-        <div id="advanced-warning" class="advanced-warning">
-          These providers may not be fully tested. For full control, use <code>openclaw onboard</code> via the CLI.
-        </div>
-      </div>
-
-      <div class="form-group" id="api-key-group">
-        <label for="api-key">API Key</label>
-        <input type="password" id="api-key" name="api-key" placeholder="sk-..." required>
-        <p class="help-text" id="api-help">
-          Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>
-        </p>
-      </div>
-
-      <div class="form-group hidden" id="ollama-endpoint-group">
-        <label for="ollama-endpoint">Ollama Endpoint</label>
-        <input type="text" id="ollama-endpoint" name="ollama-endpoint" value="http://ollama_ollama_1:11434/v1">
-        <p class="help-text">Default works with the Umbrel Ollama app. Change if Ollama runs elsewhere. Pull the models manually.</p>
-      </div>
-
-      <button type="submit" id="submit-btn">Start OpenClaw</button>
-
-      <button type="button" class="toggle-optional" onclick="toggleOptional()">
-        Show Optional Settings
-      </button>
-
-      <div id="optional-section" class="optional-section hidden">
-        <h3>Optional: Messaging Integrations</h3>
-
-        <div class="form-group">
-          <label for="telegram-token">Telegram Bot Token</label>
-          <input type="password" id="telegram-token" name="telegram-token" placeholder="123456:ABC-DEF...">
-          <p class="help-text">Create a bot via @BotFather on Telegram</p>
-        </div>
-
-        <div class="form-group">
-          <label for="discord-token">Discord Bot Token</label>
-          <input type="password" id="discord-token" name="discord-token" placeholder="MTIz...">
-          <p class="help-text">Create at <a href="https://discord.com/developers/applications" target="_blank">discord.com/developers</a></p>
-        </div>
-      </div>
-    </form>
-
-    <div class="info-box">
-      <h3>Your assistant manages itself</h3>
-      <p>Want a different model or provider later? Just ask in chat. Your assistant can update its own configuration.</p>
-      <div class="example-prompt">&ldquo;Switch to Gemini and let me know what info you need.&rdquo;</div>
+    <!--
+    <div class="hint">
+      <span class="hint-icon">&#x1f4a1;</span>
+      <span>When prompted about <strong>hooks</strong>, select <strong>Skip for now</strong>.</span>
     </div>
+    -->
 
-    <div class="divider-or">or</div>
-
-    <button type="button" class="btn-launch-terminal" id="btn-launch-terminal" onclick="launchTerminal()">
-      Advanced: Run interactive CLI setup (openclaw onboard)
-    </button>
-
-    <div id="terminal-section" class="terminal-section">
-      <h3>Interactive CLI Setup</h3>
-      <p>Full control over all providers, models, and configuration options.</p>
-      <div class="terminal-container">
-        <div id="terminal"></div>
-      </div>
-      <div id="terminal-status" class="terminal-status"></div>
+    <div class="terminal-container">
+      <div id="terminal"></div>
     </div>
+    <div id="terminal-status" class="terminal-status">Connecting...</div>
+
+    <!--
+    <div class="tip">
+      <span class="tip-icon">&#x2728;</span>
+      <div class="tip-content">
+        <strong>Your assistant manages itself.</strong> Want to switch models, change providers, or update your API key later? Just ask in chat.
+        <br>
+        <span class="tip-example">&ldquo;Switch to GPT-5 and let me know what info you need.&rdquo;</span>
+      </div>
+    </div>
+    -->
   </div>
 
-  <script>
-    const modelSelect = document.getElementById('model');
-    const apiHelp = document.getElementById('api-help');
-    const apiKeyInput = document.getElementById('api-key');
-
-    const providerHelp = {
-      anthropic: { text: 'Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>', placeholder: 'sk-ant-...' },
-      openai: { text: 'Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>', placeholder: 'sk-...' },
-      google: { text: 'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a>', placeholder: 'AIza...' },
-      moonshot: { text: 'Get your API key from <a href="https://platform.moonshot.cn/" target="_blank">platform.moonshot.cn</a>', placeholder: 'sk-...' },
-      minimax: { text: 'Get your API key from <a href="https://platform.minimaxi.com/" target="_blank">platform.minimaxi.com</a>', placeholder: 'eyJ...' },
-      qwen: { text: 'Get your API key from <a href="https://dashscope.console.aliyun.com/" target="_blank">dashscope.console.aliyun.com</a>', placeholder: 'sk-...' },
-      zai: { text: 'Get your API key from <a href="https://open.bigmodel.cn/" target="_blank">open.bigmodel.cn</a>', placeholder: '' },
-      venice: { text: 'Get your API key from <a href="https://venice.ai/settings" target="_blank">venice.ai/settings</a>', placeholder: '' },
-      xai: { text: 'Get your API key from <a href="https://console.x.ai/" target="_blank">console.x.ai</a>', placeholder: 'xai-...' },
-      mistral: { text: 'Get your API key from <a href="https://console.mistral.ai/api-keys" target="_blank">console.mistral.ai</a>', placeholder: '' },
-      groq: { text: 'Get your API key from <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>', placeholder: 'gsk_...' },
-      cerebras: { text: 'Get your API key from <a href="https://cloud.cerebras.ai/" target="_blank">cloud.cerebras.ai</a>', placeholder: 'csk-...' },
-      'github-copilot': { text: 'Use your GitHub token. Run <code>gh auth token</code> or get one from <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>', placeholder: 'ghp_...' },
-      openrouter: { text: 'Get your API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a>', placeholder: 'sk-or-...' }
-    };
-
-    const apiKeyGroup = document.getElementById('api-key-group');
-    const ollamaEndpointGroup = document.getElementById('ollama-endpoint-group');
-
-    function getProvider(modelValue) {
-      if (modelValue.startsWith('openrouter/')) return 'openrouter';
-      if (modelValue.startsWith('github-copilot/')) return 'github-copilot';
-      return modelValue.split('/')[0];
-    }
-
-    function updateApiHelp() {
-      const provider = getProvider(modelSelect.value);
-      const isOllama = provider === 'ollama';
-      apiKeyGroup.classList.toggle('hidden', isOllama);
-      ollamaEndpointGroup.classList.toggle('hidden', !isOllama);
-      apiKeyInput.required = !isOllama;
-      if (!isOllama) {
-        const info = providerHelp[provider] || providerHelp.openai;
-        apiHelp.innerHTML = info.text;
-        apiKeyInput.placeholder = info.placeholder;
-      }
-    }
-
-    function toggleAdvancedProviders() {
-      const show = document.getElementById('show-advanced').checked;
-      const warning = document.getElementById('advanced-warning');
-      document.querySelectorAll('.advanced-provider').forEach(el => {
-        el.style.display = show ? '' : 'none';
-      });
-      warning.style.display = show ? 'block' : 'none';
-      // If an advanced provider was selected and we're hiding them, reset to first option
-      if (!show) {
-        const selectedOption = modelSelect.options[modelSelect.selectedIndex];
-        if (selectedOption && selectedOption.parentElement.classList.contains('advanced-provider')) {
-          modelSelect.selectedIndex = 0;
-          updateApiHelp();
-        }
-      }
-    }
-
-    modelSelect.addEventListener('change', updateApiHelp);
-    updateApiHelp();
-
-    function toggleOptional() {
-      const section = document.getElementById('optional-section');
-      const btn = document.querySelector('.toggle-optional');
-      section.classList.toggle('hidden');
-      btn.textContent = section.classList.contains('hidden')
-        ? 'Show Optional Settings'
-        : 'Hide Optional Settings';
-    }
-
-    document.getElementById('setup-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const btn = document.getElementById('submit-btn');
-      const error = document.getElementById('error');
-      const success = document.getElementById('success');
-
-      btn.disabled = true;
-      btn.textContent = 'Setting up...';
-      error.style.display = 'none';
-      success.style.display = 'none';
-
-      const data = {
-        provider: getProvider(modelSelect.value),
-        apiKey: document.getElementById('api-key').value,
-        model: modelSelect.value,
-        ollamaEndpoint: document.getElementById('ollama-endpoint').value,
-        telegramToken: document.getElementById('telegram-token').value,
-        discordToken: document.getElementById('discord-token').value
-      };
-
-      try {
-        const res = await fetch('/api/setup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-
-        const result = await res.json();
-
-        if (result.success) {
-          success.textContent = 'Configuration saved! Starting OpenClaw...';
-          success.style.display = 'block';
-          setTimeout(() => {
-            window.location.reload();
-          }, 3000);
-        } else {
-          throw new Error(result.error || 'Setup failed');
-        }
-      } catch (err) {
-        error.textContent = err.message;
-        error.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'Start OpenClaw';
-      }
-    });
-  </script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script>
-    let term = null;
-    let termWs = null;
-
-    function launchTerminal() {
-      const btn = document.getElementById('btn-launch-terminal');
-      const section = document.getElementById('terminal-section');
+    document.addEventListener('DOMContentLoaded', () => {
       const status = document.getElementById('terminal-status');
 
-      btn.style.display = 'none';
-      section.style.display = 'block';
-      document.querySelector('.container').classList.add('terminal-active');
-      status.textContent = 'Connecting...';
-      status.className = 'terminal-status';
-
-      // Initialize xterm.js
-      term = new Terminal({
+      const term = new Terminal({
         cursorBlink: true,
         fontSize: 13,
         fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
@@ -812,17 +438,15 @@ function getSetupHtml() {
       term.open(document.getElementById('terminal'));
       fitAddon.fit();
 
-      // Connect WebSocket
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      termWs = new WebSocket(proto + '//' + location.host + '/api/terminal');
+      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal');
 
-      termWs.onopen = () => {
-        status.textContent = 'Running openclaw onboard...';
-        // Send initial size
-        termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      ws.onopen = () => {
+        status.textContent = '';
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       };
 
-      termWs.onmessage = (event) => {
+      ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
@@ -833,157 +457,41 @@ function getSetupHtml() {
               status.className = 'terminal-status success';
               setTimeout(() => window.location.reload(), 2000);
             } else {
-              status.textContent = 'Process exited with code ' + msg.code + '. You can close this and use the form above instead.';
+              status.innerHTML = 'Setup exited with an error. <button class="btn-retry" onclick="location.reload()">Retry</button>';
               status.className = 'terminal-status error';
             }
           }
         } catch (e) {}
       };
 
-      termWs.onclose = () => {
-        if (!status.textContent.includes('complete') && !status.textContent.includes('exited')) {
+      ws.onclose = () => {
+        if (!status.textContent.includes('complete') && !status.textContent.includes('error')) {
           status.textContent = 'Connection closed.';
-          status.className = 'terminal-status';
         }
       };
 
-      termWs.onerror = () => {
-        status.textContent = 'Connection error. Try refreshing the page.';
+      ws.onerror = () => {
+        status.innerHTML = 'Connection error. <button class="btn-retry" onclick="location.reload()">Retry</button>';
         status.className = 'terminal-status error';
       };
 
-      // Forward keyboard input to PTY
       term.onData((data) => {
-        if (termWs && termWs.readyState === WebSocket.OPEN) {
-          termWs.send(JSON.stringify({ type: 'input', data }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
         }
       });
 
-      // Handle resize
       const resizeObserver = new ResizeObserver(() => {
         fitAddon.fit();
-        if (termWs && termWs.readyState === WebSocket.OPEN) {
-          termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }
       });
       resizeObserver.observe(document.getElementById('terminal'));
-    }
+    });
   </script>
 </body>
 </html>`;
-}
-
-function handleApiSetup(req, res) {
-  let body = "";
-  req.on("data", (chunk) => (body += chunk));
-  req.on("end", () => {
-    try {
-      const data = JSON.parse(body);
-
-      ensureConfigDir();
-
-      // Build environment variables
-      const env = readEnv();
-      if (data.provider === "anthropic") {
-        env.ANTHROPIC_API_KEY = data.apiKey;
-      } else if (data.provider === "openai") {
-        env.OPENAI_API_KEY = data.apiKey;
-      } else if (data.provider === "google") {
-        env.GEMINI_API_KEY = data.apiKey;
-      } else if (data.provider === "moonshot") {
-        env.MOONSHOT_API_KEY = data.apiKey;
-      } else if (data.provider === "minimax") {
-        env.MINIMAX_API_KEY = data.apiKey;
-      } else if (data.provider === "qwen") {
-        env.DASHSCOPE_API_KEY = data.apiKey;
-      } else if (data.provider === "zai") {
-        env.ZAI_API_KEY = data.apiKey;
-      } else if (data.provider === "venice") {
-        env.VENICE_API_KEY = data.apiKey;
-      } else if (data.provider === "xai") {
-        env.XAI_API_KEY = data.apiKey;
-      } else if (data.provider === "mistral") {
-        env.MISTRAL_API_KEY = data.apiKey;
-      } else if (data.provider === "groq") {
-        env.GROQ_API_KEY = data.apiKey;
-      } else if (data.provider === "cerebras") {
-        env.CEREBRAS_API_KEY = data.apiKey;
-      } else if (data.provider === "github-copilot") {
-        env.COPILOT_GITHUB_TOKEN = data.apiKey;
-      } else if (data.provider === "ollama") {
-        env.OLLAMA_API_KEY = "ollama-local";
-      } else if (data.provider === "openrouter") {
-        env.OPENROUTER_API_KEY = data.apiKey;
-      }
-      if (data.telegramToken) env.TELEGRAM_BOT_TOKEN = data.telegramToken;
-      if (data.discordToken) env.DISCORD_BOT_TOKEN = data.discordToken;
-
-      // Generate a cryptographically secure random token for gateway auth
-      const gatewayToken = crypto.randomBytes(32).toString("hex");
-
-      // Also save token to env for the proxy to use
-      env.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
-
-      writeEnv(env);
-
-      // Build minimal valid config
-      const config = {
-        browser: {
-          headless: true,
-          noSandbox: true,
-          defaultProfile: "openclaw",
-        },
-        agents: {
-          defaults: {
-            model: {
-              primary: data.model,
-            },
-          },
-        },
-        ...(data.provider === "ollama" ? {
-          models: {
-            mode: "merge",
-            providers: {
-              ollama: {
-                baseUrl: data.ollamaEndpoint || "http://ollama_ollama_1:11434/v1",
-                apiKey: "ollama-local",
-                api: "openai-completions",
-                models: [],
-              },
-            },
-          },
-        } : {}),
-        gateway: {
-          mode: "local",
-          controlUi: {
-            // This is safe on umbrelOS since we're behind the auth proxy and
-            // either accessing over a secure local network or e2e encrypted
-            // remotely via tailscale.
-            allowInsecureAuth: true,
-          },
-          auth: {
-            mode: "token",
-            token: gatewayToken,
-          },
-        },
-      };
-
-      writeConfig(config);
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: true }));
-
-      // Start OpenClaw after a short delay
-      setTimeout(() => {
-        console.log("Configuration complete, starting OpenClaw...");
-        startOpenclaw();
-      }, 1000);
-    } catch (err) {
-      console.error("Setup error:", err);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: false, error: err.message }));
-    }
-  });
 }
 
 function proxyToOpenclaw(req, res) {
@@ -1083,11 +591,6 @@ function handleUpgrade(req, socket, head) {
 }
 
 const server = http.createServer((req, res) => {
-  // API endpoint for setup
-  if (req.method === "POST" && req.url === "/api/setup") {
-    return handleApiSetup(req, res);
-  }
-
   // If not configured, show setup UI (redirect to root if on another path)
   if (!isConfigured()) {
     if (req.url !== "/") {
@@ -1121,8 +624,22 @@ wss.on("connection", (ws) => {
     ptyProcess = null;
   }
 
-  // Spawn openclaw onboard in a PTY
-  ptyProcess = pty.spawn("openclaw", ["onboard"], {
+  // Spawn openclaw onboard with flags that skip everything except provider/API key selection.
+  // The CLI generates its own gateway token and writes it to openclaw.json.
+  // reconcileConfig() syncs that token to .env when startOpenclaw() runs after setup.
+  ensureConfigDir();
+  ptyProcess = pty.spawn("openclaw", [
+    "onboard",
+    "--flow", "quickstart",
+    "--accept-risk",
+    "--skip-channels",
+    "--skip-skills",
+    "--skip-daemon",
+    "--skip-ui",
+    "--skip-health",
+    "--mode", "local",
+    "--gateway-port", OPENCLAW_PORT.toString(),
+  ], {
     name: "xterm-256color",
     cols: 80,
     rows: 24,
