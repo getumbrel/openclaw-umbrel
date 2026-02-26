@@ -514,3 +514,17 @@ if (isConfigured()) {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Setup server listening on port ${PORT}`);
 });
+
+// Graceful shutdown: Docker sends SIGTERM on stop/restart/update.
+// Without this, child processes (gateway, PTY) may get hard-killed
+// mid-write and corrupt config or state files.
+process.on("SIGTERM", () => {
+  console.log("Received SIGTERM, shutting down...");
+  if (ptyProcess) {
+    try { ptyProcess.kill(); } catch (e) {}
+  }
+  if (openclawProcess) {
+    openclawProcess.kill("SIGTERM");
+  }
+  server.close();
+});
