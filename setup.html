@@ -394,6 +394,7 @@
             term.write(msg.data);
           } else if (msg.type === 'exit') {
             if (msg.code === 0) {
+              term.write('\r\n\x1b[1;32mSetup complete!\x1b[0m You\'ll be redirected to OpenClaw in a moment.\r\n');
               footerMessage.innerHTML = 'Setup complete! Reloading...';
               footerMessage.className = 'footer-message success';
               setTimeout(() => window.location.reload(), 2000);
