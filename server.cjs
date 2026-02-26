@@ -17,6 +17,7 @@ const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
 const SKELETON_DIR = "/home-skeleton";
 
 let openclawProcess = null;
+let openclawStarting = false;
 let ptyProcess = null;
 
 function readEnv() {
@@ -109,13 +110,35 @@ async function initializeHome() {
   }
 }
 
+// Config corruption recovery:
+// - Mid-run: the gateway keeps its in-memory config and stays up — no action needed.
+// - On restart: the gateway tries to boot from the corrupt file and refuses to start.
+//   We have two layers of defense:
+//   1. readConfig() restores from OpenClaw's native .bak file (covers parse failures).
+//   2. runDoctor() runs `openclaw doctor --repair` before gateway start (catches
+//      migration issues or structural problems that valid JSON + .bak can't fix).
+// - If both .json and .bak are gone/corrupt, readConfig() returns null. isConfigured()
+//   falls through to checking .env for API keys. API keys live in a separate file
+//   (auth-profiles.json), not in openclaw.json, so they survive config corruption.
+//   If auth-profiles.json itself corrupts, the user would need to re-onboard — we
+//   intentionally don't cover that edge case to avoid coupling to OpenClaw internals.
 function readConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
     }
   } catch (e) {
-    console.error("Error reading config:", e);
+    console.error("Config file corrupted, attempting restore from backup...");
+    const backupFile = CONFIG_FILE + ".bak";
+    try {
+      if (fs.existsSync(backupFile)) {
+        fs.copyFileSync(backupFile, CONFIG_FILE);
+        console.log("Restored config from backup");
+        return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+      }
+    } catch (e2) {
+      console.error("Backup restore also failed:", e2.message);
+    }
   }
   return null;
 }
@@ -219,32 +242,51 @@ function reconcileConfig() {
   }
 }
 
-// TODO: Handle corrupted/broken configs.
+// Run before gateway start to catch migration issues or config problems that
+// readConfig()'s backup restore couldn't fix (e.g. schema changes across versions).
+async function runDoctor() {
+  try {
+    await execAsync("openclaw doctor --repair --yes --non-interactive", {
+      env: { ...process.env, ...readEnv() },
+    });
+    console.log("openclaw doctor completed");
+  } catch (e) {
+    console.error("openclaw doctor failed:", e.message);
+  }
+}
 
 function startOpenclaw() {
-  if (openclawProcess) {
-    console.log("OpenClaw already running");
+  // Guard against re-entry: runDoctor() is async, so without this flag every
+  // incoming request would see openclawProcess === null and spawn another doctor run.
+  if (openclawProcess || openclawStarting) {
     return;
   }
 
+  openclawStarting = true;
   reconcileConfig();
 
-  console.log("Starting OpenClaw gateway...");
-  openclawProcess = spawn(
-    "openclaw",
-    ["gateway", "--port", OPENCLAW_PORT.toString()],
-    {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        ...readEnv(),
-      },
-    }
-  );
+  // .finally() ensures the gateway starts even if doctor fails or rejects —
+  // a degraded gateway is better than no gateway.
+  console.log("Running openclaw doctor before gateway start...");
+  runDoctor().finally(() => {
+    openclawStarting = false;
+    console.log("Starting OpenClaw gateway...");
+    openclawProcess = spawn(
+      "openclaw",
+      ["gateway", "--port", OPENCLAW_PORT.toString()],
+      {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          ...readEnv(),
+        },
+      }
+    );
 
-  openclawProcess.on("exit", (code) => {
-    console.log(`OpenClaw exited with code ${code}`);
-    openclawProcess = null;
+    openclawProcess.on("exit", (code) => {
+      console.log(`OpenClaw exited with code ${code}`);
+      openclawProcess = null;
+    });
   });
 }
 
