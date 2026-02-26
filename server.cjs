@@ -219,18 +219,7 @@ function reconcileConfig() {
   }
 }
 
-// TODO: Add config recovery chain for corrupted/broken configs.
-// This is a common issue in the wild. Proposed approach (be careful not to nuke user files):
-//   1. Run `openclaw doctor --fix` on every boot before starting the gateway
-//   2. If gateway crashes, run `openclaw doctor --fix` again and restart
-//   3. If it crashes again, restore from .bak file (openclaw auto-creates these)
-//   4. If still broken, clear config.wizard (NOT workspace or .env) and show setup page
-//      with a message explaining what happened, letting the user re-run onboard
-//   5. Consider adding a /api/reconfigure endpoint for users stuck with a running
-//      but non-functional gateway (e.g. expired API key)
-// IMPORTANT: Never delete the workspace (/data/.openclaw/workspace) or .env — only
-// reset the wizard state. For steps 3-4, consider showing a choice to the user
-// rather than auto-recovering, since .bak restore could undo intentional config changes.
+// TODO: Handle corrupted/broken configs.
 
 function startOpenclaw() {
   if (openclawProcess) {
@@ -394,7 +383,7 @@ const wss = new WebSocket.Server({ noServer: true });
 wss.on("connection", (ws) => {
   console.log("Terminal WebSocket connected");
 
-  // Kill any existing PTY
+  // Only one setup session at a time — kill any existing PTY (e.g. stale tab)
   if (ptyProcess) {
     try { ptyProcess.kill(); } catch (e) {}
     ptyProcess = null;
