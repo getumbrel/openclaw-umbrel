@@ -34,8 +34,10 @@ RUN printf '#!/bin/bash\necho "Error: apt is not available. Please use brew inst
     && sudo ln -s /usr/local/bin/use-brew /usr/local/bin/apt \
     && sudo ln -s /usr/local/bin/use-brew /usr/local/bin/apt-get
 
-# Copy setup UI server
+# Copy setup UI server and static files
 COPY --chown=node:node server.cjs /app/setup-server.cjs
+COPY --chown=node:node setup.html /app/setup.html
+COPY --chown=node:node logo.webp /app/logo.webp
 
 # Move home to skeleton
 RUN sudo mv /data /home-skeleton

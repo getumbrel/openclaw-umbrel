@@ -3,7 +3,6 @@ const net = require("net");
 const fs = require("fs");
 const fsp = require("fs").promises;
 const path = require("path");
-const crypto = require("crypto");
 const { spawn, exec } = require("child_process");
 const { promisify } = require("util");
 const execAsync = promisify(exec);
@@ -260,246 +259,14 @@ function startOpenclaw() {
   });
 }
 
-function getSetupHtml() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenClaw Setup</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .container {
-      background: #fff;
-      border-radius: 16px;
-      padding: 40px;
-      max-width: 820px;
-      width: 100%;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    }
-    h1 {
-      font-size: 28px;
-      margin-bottom: 8px;
-      color: #1a1a2e;
-    }
-    .subtitle {
-      color: #666;
-      margin-bottom: 24px;
-    }
-    .terminal-container {
-      background: #1e1e1e;
-      border-radius: 8px;
-      padding: 8px;
-      overflow: hidden;
-    }
-    .terminal-container .xterm {
-      padding: 4px;
-    }
-    .hint {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      background: #fefce8;
-      border: 1px solid #fde68a;
-      border-radius: 8px;
-      padding: 12px 16px;
-      margin-bottom: 20px;
-      font-size: 13px;
-      color: #854d0e;
-      line-height: 1.5;
-    }
-    .hint-icon {
-      flex-shrink: 0;
-      font-size: 16px;
-    }
-    .terminal-container {
-      background: #1e1e1e;
-      border-radius: 8px;
-      padding: 8px;
-      overflow: hidden;
-    }
-    .terminal-container .xterm {
-      padding: 4px;
-    }
-    .terminal-status {
-      font-size: 12px;
-      color: #666;
-      margin-top: 8px;
-      text-align: center;
-    }
-    .terminal-status.success {
-      color: #059669;
-    }
-    .terminal-status.error {
-      color: #dc2626;
-    }
-    .btn-retry {
-      display: inline-block;
-      margin-top: 12px;
-      padding: 10px 24px;
-      background: #6366f1;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .btn-retry:hover {
-      background: #4f46e5;
-    }
-    .tip {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      background: #f0f4ff;
-      border: 1px solid #c7d2fe;
-      border-radius: 10px;
-      padding: 16px 20px;
-      margin-top: 20px;
-    }
-    .tip-icon {
-      flex-shrink: 0;
-      font-size: 20px;
-    }
-    .tip-content {
-      font-size: 14px;
-      color: #1e1b4b;
-      line-height: 1.6;
-    }
-    .tip-content strong {
-      color: #4338ca;
-    }
-    .tip-example {
-      display: inline-block;
-      background: #e0e7ff;
-      border-radius: 6px;
-      padding: 4px 10px;
-      font-style: italic;
-      font-size: 13px;
-      color: #3730a3;
-      margin-top: 6px;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Welcome to OpenClaw</h1>
-    <p class="subtitle">Choose your AI provider and paste your API key to get started.</p>
-
-    <!--
-    <div class="hint">
-      <span class="hint-icon">&#x1f4a1;</span>
-      <span>When prompted about <strong>hooks</strong>, select <strong>Skip for now</strong>.</span>
-    </div>
-    -->
-
-    <div class="terminal-container">
-      <div id="terminal"></div>
-    </div>
-    <div id="terminal-status" class="terminal-status">Connecting...</div>
-
-    <!--
-    <div class="tip">
-      <span class="tip-icon">&#x2728;</span>
-      <div class="tip-content">
-        <strong>Your assistant manages itself.</strong> Want to switch models, change providers, or update your API key later? Just ask in chat.
-        <br>
-        <span class="tip-example">&ldquo;Switch to GPT-5 and let me know what info you need.&rdquo;</span>
-      </div>
-    </div>
-    -->
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const status = document.getElementById('terminal-status');
-
-      const term = new Terminal({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
-        theme: {
-          background: '#1e1e1e',
-          foreground: '#d4d4d4',
-          cursor: '#d4d4d4',
-        },
-        rows: 24,
-        cols: 80,
-      });
-
-      const fitAddon = new FitAddon.FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(document.getElementById('terminal'));
-      fitAddon.fit();
-
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal');
-
-      ws.onopen = () => {
-        status.textContent = '';
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'output') {
-            term.write(msg.data);
-          } else if (msg.type === 'exit') {
-            if (msg.code === 0) {
-              status.textContent = 'Setup complete! Reloading...';
-              status.className = 'terminal-status success';
-              setTimeout(() => window.location.reload(), 2000);
-            } else {
-              status.innerHTML = 'Setup exited with an error. <button class="btn-retry" onclick="location.reload()">Retry</button>';
-              status.className = 'terminal-status error';
-            }
-          }
-        } catch (e) {}
-      };
-
-      ws.onclose = () => {
-        if (!status.textContent.includes('complete') && !status.textContent.includes('error')) {
-          status.textContent = 'Connection closed.';
-        }
-      };
-
-      ws.onerror = () => {
-        status.innerHTML = 'Connection error. <button class="btn-retry" onclick="location.reload()">Retry</button>';
-        status.className = 'terminal-status error';
-      };
-
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data }));
-        }
-      });
-
-      const resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        }
-      });
-      resizeObserver.observe(document.getElementById('terminal'));
-    });
-  </script>
-</body>
-</html>`;
-}
+// Read static files at startup
+const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
+const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
+const LOADING_HTML = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Starting...</title>
+<meta http-equiv="refresh" content="2">
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#0D0D0D;color:#F0EDE8;}</style>
+</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div></body></html>`;
 
 function proxyToOpenclaw(req, res) {
   const token = getGatewayToken();
@@ -533,11 +300,7 @@ function proxyToOpenclaw(req, res) {
   proxy.on("error", () => {
     // OpenClaw not ready yet, show loading page
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Starting...</title>
-<meta http-equiv="refresh" content="2">
-<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a2e;color:#fff;}</style>
-</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div></body></html>`);
+    res.end(LOADING_HTML);
   });
 
   req.pipe(proxy);
@@ -598,7 +361,13 @@ function handleUpgrade(req, socket, head) {
 }
 
 const server = http.createServer((req, res) => {
-  // If not configured, show setup UI (redirect to root if on another path)
+  // Serve static assets for setup UI
+  if (req.url === "/logo.webp") {
+    res.writeHead(200, { "Content-Type": "image/webp", "Cache-Control": "public, max-age=86400" });
+    res.end(LOGO);
+    return;
+  }
+
   if (!isConfigured()) {
     if (req.url !== "/") {
       res.writeHead(302, { Location: "/" });
@@ -606,7 +375,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(getSetupHtml());
+    res.end(SETUP_HTML);
     return;
   }
 
@@ -664,7 +433,9 @@ wss.on("connection", (ws) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "output", data }));
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Error sending PTY output:", e.message);
+    }
   });
 
   // PTY exit -> notify client
@@ -674,7 +445,9 @@ wss.on("connection", (ws) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "exit", code: exitCode }));
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Error sending exit message:", e.message);
+    }
     ptyProcess = null;
   });
 
@@ -687,7 +460,9 @@ wss.on("connection", (ws) => {
       } else if (parsed.type === "resize" && ptyProcess) {
         ptyProcess.resize(parsed.cols, parsed.rows);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Error processing terminal input:", e.message);
+    }
   });
 
   ws.on("close", () => {
