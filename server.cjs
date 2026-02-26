@@ -268,7 +268,15 @@ function proxyToOpenclaw(req, res) {
     return;
   }
 
+  // Rewrite headers so the gateway sees requests as local.
+  // The gateway checks Origin/Host to block cross-origin requests (anti-CSRF),
+  // but that's redundant here — our proxy is the only thing that can reach the
+  // gateway (it binds to 127.0.0.1 inside the container), and on Umbrel the
+  // entire app is already behind Umbrel's auth proxy.
+  const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
   const headers = { ...req.headers };
+  headers["host"] = gatewayHost;
+  headers["origin"] = `http://${gatewayHost}`;
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -304,8 +312,11 @@ function handleUpgrade(req, socket, head) {
     // Rebuild the upgrade request with auth header
     let requestLine = `${req.method} ${req.url} HTTP/1.1\r\n`;
 
-    // Copy headers and add auth
+    // Rewrite headers to appear local (same rationale as HTTP proxy above)
+    const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
     const headers = { ...req.headers };
+    headers["host"] = gatewayHost;
+    headers["origin"] = `http://${gatewayHost}`;
     if (token) {
       headers["authorization"] = `Bearer ${token}`;
     }
