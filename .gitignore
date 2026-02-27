@@ -7,12 +7,16 @@
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE / tools
 .vscode
 .idea
+.claude
 *.swp
 *.swo
 *~
+
+# Dependencies
+node_modules
 
 # Docker
 *.log
