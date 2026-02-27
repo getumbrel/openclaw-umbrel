@@ -3,10 +3,11 @@ const net = require("net");
 const fs = require("fs");
 const fsp = require("fs").promises;
 const path = require("path");
-const crypto = require("crypto");
 const { spawn, exec } = require("child_process");
 const { promisify } = require("util");
 const execAsync = promisify(exec);
+const pty = require("/app/node_modules/node-pty");
+const WebSocket = require("/app/node_modules/ws");
 
 const CONFIG_DIR = process.env.OPENCLAW_DATA_DIR || "/data/.openclaw";
 const CONFIG_FILE = path.join(CONFIG_DIR, "openclaw.json");
@@ -16,6 +17,8 @@ const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
 const SKELETON_DIR = "/home-skeleton";
 
 let openclawProcess = null;
+let openclawStarting = false;
+let ptyProcess = null;
 
 function readEnv() {
   const env = {};
@@ -107,7 +110,57 @@ async function initializeHome() {
   }
 }
 
+// Config corruption recovery:
+// - Mid-run: the gateway keeps its in-memory config and stays up — no action needed.
+// - On restart: the gateway tries to boot from the corrupt file and refuses to start.
+//   We have two layers of defense:
+//   1. readConfig() restores from OpenClaw's native .bak file (covers parse failures).
+//   2. runDoctor() runs `openclaw doctor --repair` before gateway start (catches
+//      migration issues or structural problems that valid JSON + .bak can't fix).
+// - If both .json and .bak are gone/corrupt, readConfig() returns null. isConfigured()
+//   falls through to checking .env for API keys. API keys live in a separate file
+//   (auth-profiles.json), not in openclaw.json, so they survive config corruption.
+//   If auth-profiles.json itself corrupts, the user would need to re-onboard — we
+//   intentionally don't cover that edge case to avoid coupling to OpenClaw internals.
+function readConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    }
+  } catch (e) {
+    console.error("Config file corrupted, attempting restore from backup...");
+    const backupFile = CONFIG_FILE + ".bak";
+    try {
+      if (fs.existsSync(backupFile)) {
+        fs.copyFileSync(backupFile, CONFIG_FILE);
+        console.log("Restored config from backup");
+        return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+      }
+    } catch (e2) {
+      console.error("Backup restore also failed:", e2.message);
+    }
+  }
+  return null;
+}
+
+function getGatewayToken() {
+  const env = readEnv();
+  if (env.OPENCLAW_GATEWAY_TOKEN) return env.OPENCLAW_GATEWAY_TOKEN;
+  if (process.env.OPENCLAW_GATEWAY_TOKEN) return process.env.OPENCLAW_GATEWAY_TOKEN;
+  const config = readConfig();
+  if (config && config.gateway && config.gateway.auth && config.gateway.auth.token) {
+    return config.gateway.auth.token;
+  }
+  return null;
+}
+
 function isConfigured() {
+  // Check if the CLI onboard has been completed (writes wizard section to config)
+  const config = readConfig();
+  if (config && config.wizard) {
+    return true;
+  }
+
   const env = readEnv();
   return !!(
     env.ANTHROPIC_API_KEY ||
@@ -143,521 +196,111 @@ function isConfigured() {
   );
 }
 
+function reconcileConfig() {
+  const config = readConfig();
+  if (!config) return;
+
+  let changed = false;
+
+  // Ensure allowInsecureAuth is set (needed for Umbrel's auth proxy)
+  if (!config.gateway) config.gateway = {};
+  if (!config.gateway.controlUi) config.gateway.controlUi = {};
+  if (!config.gateway.controlUi.allowInsecureAuth) {
+    config.gateway.controlUi.allowInsecureAuth = true;
+    changed = true;
+    console.log("Patched config: enabled allowInsecureAuth");
+  }
+
+  // Disable device auth (would break access via umbrel.local)
+  if (!config.gateway.controlUi.dangerouslyDisableDeviceAuth) {
+    config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+    changed = true;
+    console.log("Patched config: disabled device auth");
+  }
+
+  // Disable update checks (updates are managed by Umbrel via Docker image bumps)
+  if (!config.update) config.update = {};
+  if (config.update.checkOnStart !== false) {
+    config.update.checkOnStart = false;
+    changed = true;
+    console.log("Patched config: disabled update check on start");
+  }
+
+  if (changed) {
+    writeConfig(config);
+  }
+
+  // Sync gateway token to .env so the proxy always has it
+  const token = config.gateway && config.gateway.auth && config.gateway.auth.token;
+  if (token) {
+    const env = readEnv();
+    if (env.OPENCLAW_GATEWAY_TOKEN !== token) {
+      env.OPENCLAW_GATEWAY_TOKEN = token;
+      writeEnv(env);
+      console.log("Synced gateway token to .env");
+    }
+  }
+}
+
+// Run before gateway start to catch migration issues or config problems that
+// readConfig()'s backup restore couldn't fix (e.g. schema changes across versions).
+async function runDoctor() {
+  try {
+    await execAsync("openclaw doctor --repair --yes --non-interactive", {
+      env: { ...process.env, ...readEnv() },
+    });
+    console.log("openclaw doctor completed");
+  } catch (e) {
+    console.error("openclaw doctor failed:", e.message);
+  }
+}
+
 function startOpenclaw() {
-  if (openclawProcess) {
-    console.log("OpenClaw already running");
+  // Guard against re-entry: runDoctor() is async, so without this flag every
+  // incoming request would see openclawProcess === null and spawn another doctor run.
+  if (openclawProcess || openclawStarting) {
     return;
   }
 
-  console.log("Starting OpenClaw gateway...");
-  openclawProcess = spawn(
-    "openclaw",
-    ["gateway", "--port", OPENCLAW_PORT.toString()],
-    {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        ...readEnv(),
-      },
-    }
-  );
+  openclawStarting = true;
+  reconcileConfig();
 
-  openclawProcess.on("exit", (code) => {
-    console.log(`OpenClaw exited with code ${code}`);
-    openclawProcess = null;
-  });
-}
-
-function getSetupHtml() {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenClaw Setup</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .container {
-      background: #fff;
-      border-radius: 16px;
-      padding: 40px;
-      max-width: 500px;
-      width: 100%;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    }
-    h1 {
-      font-size: 28px;
-      margin-bottom: 8px;
-      color: #1a1a2e;
-    }
-    .subtitle {
-      color: #666;
-      margin-bottom: 32px;
-    }
-    .form-group {
-      margin-bottom: 24px;
-    }
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #333;
-    }
-    input[type="password"], input[type="text"], select {
-      width: 100%;
-      padding: 12px 16px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-size: 16px;
-      transition: border-color 0.2s;
-    }
-    input:focus, select:focus {
-      outline: none;
-      border-color: #6366f1;
-    }
-    .help-text {
-      font-size: 13px;
-      color: #666;
-      margin-top: 6px;
-    }
-    .help-text a {
-      color: #6366f1;
-    }
-    button {
-      width: 100%;
-      padding: 14px;
-      background: #6366f1;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    button:hover {
-      background: #4f46e5;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    .error {
-      background: #fee2e2;
-      color: #dc2626;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      display: none;
-    }
-    .success {
-      background: #d1fae5;
-      color: #059669;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      display: none;
-    }
-    .divider {
-      text-align: center;
-      color: #999;
-      margin: 20px 0;
-      position: relative;
-    }
-    .divider::before, .divider::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 40%;
-      height: 1px;
-      background: #e0e0e0;
-    }
-    .divider::before { left: 0; }
-    .divider::after { right: 0; }
-    .optional-section {
-      background: #f8fafc;
-      padding: 20px;
-      border-radius: 8px;
-      margin-top: 24px;
-    }
-    .optional-section h3 {
-      font-size: 16px;
-      margin-bottom: 16px;
-      color: #475569;
-    }
-    .toggle-optional {
-      background: none;
-      border: 1px solid #e0e0e0;
-      color: #666;
-      margin-top: 16px;
-    }
-    .toggle-optional:hover {
-      background: #f0f0f0;
-      border-color: #ccc;
-    }
-    .hidden { display: none; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Welcome to OpenClaw</h1>
-    <p class="subtitle">Your personal AI assistant. Let's get you set up.</p>
-
-    <div id="error" class="error"></div>
-    <div id="success" class="success"></div>
-
-    <form id="setup-form">
-      <div class="form-group">
-        <label for="model">Model</label>
-        <select id="model" name="model">
-          <optgroup label="Anthropic">
-            <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Fast)</option>
-            <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6 (Fast)</option>
-            <option value="anthropic/claude-opus-4-6">Claude Opus 4.6 (Powerful)</option>
-            <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
-          </optgroup>
-          <optgroup label="OpenAI">
-            <option value="openai/gpt-5.3-codex">GPT-5.3 Codex (Coding)</option>
-            <option value="openai/gpt-5.2-codex">GPT-5.2 Codex (Coding)</option>
-            <option value="openai/gpt-5.2">GPT-5.2 (Powerful)</option>
-            <option value="openai/gpt-4o-mini">GPT-4o Mini (Cheap)</option>
-          </optgroup>
-          <optgroup label="Google Gemini">
-            <option value="google/gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
-            <option value="google/gemini-3-pro-preview">Gemini 3 Pro Preview</option>
-            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
-            <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
-          </optgroup>
-          <optgroup label="Moonshot">
-            <option value="moonshot/kimi-k2.5">Kimi K2.5</option>
-          </optgroup>
-          <optgroup label="Ollama (Local)">
-            <option value="ollama/llama3.2:3b">Llama 3.2 3B</option>
-            <option value="ollama/qwen2.5-coder:7b">Qwen 2.5 Coder 7B</option>
-            <option value="ollama/deepseek-r1:8b">DeepSeek R1 8B</option>
-          </optgroup>
-          <optgroup label="OpenRouter">
-            <option value="openrouter/auto">Auto</option>
-            <option value="openrouter/anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 via OpenRouter</option>
-            <option value="openrouter/anthropic/claude-sonnet-4-6">Claude Sonnet 4.6 via OpenRouter</option>
-            <option value="openrouter/openai/gpt-5.3-codex">GPT-5.3 Codex via OpenRouter</option>
-            <option value="openrouter/google/gemini-2.5-pro">Gemini 2.5 Pro via OpenRouter</option>
-            <option value="openrouter/deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
-            <option value="openrouter/meta-llama/llama-4-maverick">Llama 4 Maverick via OpenRouter</option>
-          </optgroup>
-          <optgroup label="MiniMax">
-            <option value="minimax/m2.1">MiniMax M2.1</option>
-            <option value="minimax/m2.1-lightning">MiniMax M2.1 Lightning (Fast)</option>
-          </optgroup>
-          <optgroup label="Qwen (DashScope)">
-            <option value="qwen/qwen3-235b-a22b">Qwen3 235B (Powerful)</option>
-            <option value="qwen/qwen3-32b">Qwen3 32B (Fast)</option>
-            <option value="qwen/qwen-coder-plus">Qwen Coder Plus</option>
-          </optgroup>
-          <optgroup label="Z.AI (GLM)">
-            <option value="zai/glm-4.7">GLM 4.7</option>
-            <option value="zai/glm-4.7-flash">GLM 4.7 Flash (Fast)</option>
-            <option value="zai/glm-4.6">GLM 4.6</option>
-          </optgroup>
-          <optgroup label="Venice AI">
-            <option value="venice/llama-3.3-70b">Llama 3.3 70B</option>
-            <option value="venice/deepseek-v3.2">DeepSeek V3.2</option>
-            <option value="venice/kimi-k2-5">Kimi K2.5 via Venice</option>
-          </optgroup>
-          <optgroup label="xAI">
-            <option value="xai/grok-3">Grok 3</option>
-            <option value="xai/grok-3-mini">Grok 3 Mini (Fast)</option>
-          </optgroup>
-          <optgroup label="Mistral">
-            <option value="mistral/mistral-large-latest">Mistral Large</option>
-            <option value="mistral/codestral-latest">Codestral (Coding)</option>
-          </optgroup>
-          <optgroup label="Groq">
-            <option value="groq/llama-3.3-70b-versatile">Llama 3.3 70B (Fast)</option>
-          </optgroup>
-          <optgroup label="Cerebras">
-            <option value="cerebras/llama-3.3-70b">Llama 3.3 70B (Fast)</option>
-          </optgroup>
-          <optgroup label="GitHub Copilot">
-            <option value="github-copilot/gpt-4o">GPT-4o via Copilot</option>
-            <option value="github-copilot/claude-sonnet-4">Claude Sonnet 4 via Copilot</option>
-          </optgroup>
-        </select>
-      </div>
-
-      <div class="form-group" id="api-key-group">
-        <label for="api-key">API Key</label>
-        <input type="password" id="api-key" name="api-key" placeholder="sk-..." required>
-        <p class="help-text" id="api-help">
-          Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>
-        </p>
-      </div>
-
-      <div class="form-group hidden" id="ollama-endpoint-group">
-        <label for="ollama-endpoint">Ollama Endpoint</label>
-        <input type="text" id="ollama-endpoint" name="ollama-endpoint" value="http://ollama_ollama_1:11434/v1">
-        <p class="help-text">Default works with the Umbrel Ollama app. Change if Ollama runs elsewhere. Pull the models manually.</p>
-      </div>
-
-      <button type="submit" id="submit-btn">Start OpenClaw</button>
-
-      <button type="button" class="toggle-optional" onclick="toggleOptional()">
-        Show Optional Settings
-      </button>
-
-      <div id="optional-section" class="optional-section hidden">
-        <h3>Optional: Messaging Integrations</h3>
-
-        <div class="form-group">
-          <label for="telegram-token">Telegram Bot Token</label>
-          <input type="password" id="telegram-token" name="telegram-token" placeholder="123456:ABC-DEF...">
-          <p class="help-text">Create a bot via @BotFather on Telegram</p>
-        </div>
-
-        <div class="form-group">
-          <label for="discord-token">Discord Bot Token</label>
-          <input type="password" id="discord-token" name="discord-token" placeholder="MTIz...">
-          <p class="help-text">Create at <a href="https://discord.com/developers/applications" target="_blank">discord.com/developers</a></p>
-        </div>
-      </div>
-    </form>
-  </div>
-
-  <script>
-    const modelSelect = document.getElementById('model');
-    const apiHelp = document.getElementById('api-help');
-    const apiKeyInput = document.getElementById('api-key');
-
-    const providerHelp = {
-      anthropic: { text: 'Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>', placeholder: 'sk-ant-...' },
-      openai: { text: 'Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>', placeholder: 'sk-...' },
-      google: { text: 'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a>', placeholder: 'AIza...' },
-      moonshot: { text: 'Get your API key from <a href="https://platform.moonshot.cn/" target="_blank">platform.moonshot.cn</a>', placeholder: 'sk-...' },
-      minimax: { text: 'Get your API key from <a href="https://platform.minimaxi.com/" target="_blank">platform.minimaxi.com</a>', placeholder: 'eyJ...' },
-      qwen: { text: 'Get your API key from <a href="https://dashscope.console.aliyun.com/" target="_blank">dashscope.console.aliyun.com</a>', placeholder: 'sk-...' },
-      zai: { text: 'Get your API key from <a href="https://open.bigmodel.cn/" target="_blank">open.bigmodel.cn</a>', placeholder: '' },
-      venice: { text: 'Get your API key from <a href="https://venice.ai/settings" target="_blank">venice.ai/settings</a>', placeholder: '' },
-      xai: { text: 'Get your API key from <a href="https://console.x.ai/" target="_blank">console.x.ai</a>', placeholder: 'xai-...' },
-      mistral: { text: 'Get your API key from <a href="https://console.mistral.ai/api-keys" target="_blank">console.mistral.ai</a>', placeholder: '' },
-      groq: { text: 'Get your API key from <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>', placeholder: 'gsk_...' },
-      cerebras: { text: 'Get your API key from <a href="https://cloud.cerebras.ai/" target="_blank">cloud.cerebras.ai</a>', placeholder: 'csk-...' },
-      'github-copilot': { text: 'Use your GitHub token. Run <code>gh auth token</code> or get one from <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>', placeholder: 'ghp_...' },
-      openrouter: { text: 'Get your API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a>', placeholder: 'sk-or-...' }
-    };
-
-    const apiKeyGroup = document.getElementById('api-key-group');
-    const ollamaEndpointGroup = document.getElementById('ollama-endpoint-group');
-
-    function getProvider(modelValue) {
-      if (modelValue.startsWith('openrouter/')) return 'openrouter';
-      if (modelValue.startsWith('github-copilot/')) return 'github-copilot';
-      return modelValue.split('/')[0];
-    }
-
-    function updateApiHelp() {
-      const provider = getProvider(modelSelect.value);
-      const isOllama = provider === 'ollama';
-      apiKeyGroup.classList.toggle('hidden', isOllama);
-      ollamaEndpointGroup.classList.toggle('hidden', !isOllama);
-      apiKeyInput.required = !isOllama;
-      if (!isOllama) {
-        const info = providerHelp[provider] || providerHelp.openai;
-        apiHelp.innerHTML = info.text;
-        apiKeyInput.placeholder = info.placeholder;
+  // .finally() ensures the gateway starts even if doctor fails or rejects —
+  // a degraded gateway is better than no gateway.
+  console.log("Running openclaw doctor before gateway start...");
+  runDoctor().finally(() => {
+    openclawStarting = false;
+    console.log("Starting OpenClaw gateway...");
+    openclawProcess = spawn(
+      "openclaw",
+      ["gateway", "--port", OPENCLAW_PORT.toString()],
+      {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          ...readEnv(),
+        },
       }
-    }
+    );
 
-    modelSelect.addEventListener('change', updateApiHelp);
-    updateApiHelp();
-
-    function toggleOptional() {
-      const section = document.getElementById('optional-section');
-      const btn = document.querySelector('.toggle-optional');
-      section.classList.toggle('hidden');
-      btn.textContent = section.classList.contains('hidden')
-        ? 'Show Optional Settings'
-        : 'Hide Optional Settings';
-    }
-
-    document.getElementById('setup-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const btn = document.getElementById('submit-btn');
-      const error = document.getElementById('error');
-      const success = document.getElementById('success');
-
-      btn.disabled = true;
-      btn.textContent = 'Setting up...';
-      error.style.display = 'none';
-      success.style.display = 'none';
-
-      const data = {
-        provider: getProvider(modelSelect.value),
-        apiKey: document.getElementById('api-key').value,
-        model: modelSelect.value,
-        ollamaEndpoint: document.getElementById('ollama-endpoint').value,
-        telegramToken: document.getElementById('telegram-token').value,
-        discordToken: document.getElementById('discord-token').value
-      };
-
-      try {
-        const res = await fetch('/api/setup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-
-        const result = await res.json();
-
-        if (result.success) {
-          success.textContent = 'Configuration saved! Starting OpenClaw...';
-          success.style.display = 'block';
-          setTimeout(() => {
-            window.location.reload();
-          }, 3000);
-        } else {
-          throw new Error(result.error || 'Setup failed');
-        }
-      } catch (err) {
-        error.textContent = err.message;
-        error.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'Start OpenClaw';
-      }
+    openclawProcess.on("exit", (code) => {
+      console.log(`OpenClaw exited with code ${code}`);
+      openclawProcess = null;
     });
-  </script>
-</body>
-</html>`;
-}
-
-function handleApiSetup(req, res) {
-  let body = "";
-  req.on("data", (chunk) => (body += chunk));
-  req.on("end", () => {
-    try {
-      const data = JSON.parse(body);
-
-      ensureConfigDir();
-
-      // Build environment variables
-      const env = readEnv();
-      if (data.provider === "anthropic") {
-        env.ANTHROPIC_API_KEY = data.apiKey;
-      } else if (data.provider === "openai") {
-        env.OPENAI_API_KEY = data.apiKey;
-      } else if (data.provider === "google") {
-        env.GEMINI_API_KEY = data.apiKey;
-      } else if (data.provider === "moonshot") {
-        env.MOONSHOT_API_KEY = data.apiKey;
-      } else if (data.provider === "minimax") {
-        env.MINIMAX_API_KEY = data.apiKey;
-      } else if (data.provider === "qwen") {
-        env.DASHSCOPE_API_KEY = data.apiKey;
-      } else if (data.provider === "zai") {
-        env.ZAI_API_KEY = data.apiKey;
-      } else if (data.provider === "venice") {
-        env.VENICE_API_KEY = data.apiKey;
-      } else if (data.provider === "xai") {
-        env.XAI_API_KEY = data.apiKey;
-      } else if (data.provider === "mistral") {
-        env.MISTRAL_API_KEY = data.apiKey;
-      } else if (data.provider === "groq") {
-        env.GROQ_API_KEY = data.apiKey;
-      } else if (data.provider === "cerebras") {
-        env.CEREBRAS_API_KEY = data.apiKey;
-      } else if (data.provider === "github-copilot") {
-        env.COPILOT_GITHUB_TOKEN = data.apiKey;
-      } else if (data.provider === "ollama") {
-        env.OLLAMA_API_KEY = "ollama-local";
-      } else if (data.provider === "openrouter") {
-        env.OPENROUTER_API_KEY = data.apiKey;
-      }
-      if (data.telegramToken) env.TELEGRAM_BOT_TOKEN = data.telegramToken;
-      if (data.discordToken) env.DISCORD_BOT_TOKEN = data.discordToken;
-
-      // Generate a cryptographically secure random token for gateway auth
-      const gatewayToken = crypto.randomBytes(32).toString("hex");
-
-      // Also save token to env for the proxy to use
-      env.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
-
-      writeEnv(env);
-
-      // Build minimal valid config
-      const config = {
-        browser: {
-          headless: true,
-          noSandbox: true,
-          defaultProfile: "openclaw",
-        },
-        agents: {
-          defaults: {
-            model: {
-              primary: data.model,
-            },
-          },
-        },
-        ...(data.provider === "ollama" ? {
-          models: {
-            mode: "merge",
-            providers: {
-              ollama: {
-                baseUrl: data.ollamaEndpoint || "http://ollama_ollama_1:11434/v1",
-                apiKey: "ollama-local",
-                api: "openai-completions",
-                models: [],
-              },
-            },
-          },
-        } : {}),
-        gateway: {
-          mode: "local",
-          controlUi: {
-            // This is safe on umbrelOS since we're behind the auth proxy and
-            // either accessing over a secure local network or e2e encrypted
-            // remotely via tailscale.
-            allowInsecureAuth: true,
-            // Disable device auth as this would break access via umbrel.local
-            dangerouslyDisableDeviceAuth: true
-          },
-          auth: {
-            mode: "token",
-            token: gatewayToken,
-          },
-        },
-      };
-
-      writeConfig(config);
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: true }));
-
-      // Start OpenClaw after a short delay
-      setTimeout(() => {
-        console.log("Configuration complete, starting OpenClaw...");
-        startOpenclaw();
-      }, 1000);
-    } catch (err) {
-      console.error("Setup error:", err);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: false, error: err.message }));
-    }
   });
 }
+
+// Read static files at startup
+const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
+const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
+const LOADING_HTML = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Starting...</title>
+<meta http-equiv="refresh" content="2">
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#0D0D0D;color:#F0EDE8;}</style>
+</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div></body></html>`;
 
 function proxyToOpenclaw(req, res) {
-  const env = readEnv();
-  const token =
-    env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
+  const token = getGatewayToken();
 
   // For the root path, redirect to include token if not present
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -667,7 +310,15 @@ function proxyToOpenclaw(req, res) {
     return;
   }
 
+  // Rewrite headers so the gateway sees requests as local.
+  // The gateway checks Origin/Host to block cross-origin requests (anti-CSRF),
+  // but that's redundant here — our proxy is the only thing that can reach the
+  // gateway (it binds to 127.0.0.1 inside the container), and on Umbrel the
+  // entire app is already behind Umbrel's auth proxy.
+  const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
   const headers = { ...req.headers };
+  headers["host"] = gatewayHost;
+  headers["origin"] = `http://${gatewayHost}`;
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -688,11 +339,7 @@ function proxyToOpenclaw(req, res) {
   proxy.on("error", () => {
     // OpenClaw not ready yet, show loading page
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Starting...</title>
-<meta http-equiv="refresh" content="2">
-<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a2e;color:#fff;}</style>
-</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div></body></html>`);
+    res.end(LOADING_HTML);
   });
 
   req.pipe(proxy);
@@ -700,17 +347,18 @@ function proxyToOpenclaw(req, res) {
 
 // Handle WebSocket upgrade requests
 function handleUpgrade(req, socket, head) {
-  const env = readEnv();
-  const token =
-    env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
+  const token = getGatewayToken();
 
   // Connect to OpenClaw gateway
   const proxySocket = net.connect(OPENCLAW_PORT, "127.0.0.1", () => {
     // Rebuild the upgrade request with auth header
     let requestLine = `${req.method} ${req.url} HTTP/1.1\r\n`;
 
-    // Copy headers and add auth
+    // Rewrite headers to appear local (same rationale as HTTP proxy above)
+    const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
     const headers = { ...req.headers };
+    headers["host"] = gatewayHost;
+    headers["origin"] = `http://${gatewayHost}`;
     if (token) {
       headers["authorization"] = `Bearer ${token}`;
     }
@@ -755,12 +403,13 @@ function handleUpgrade(req, socket, head) {
 }
 
 const server = http.createServer((req, res) => {
-  // API endpoint for setup
-  if (req.method === "POST" && req.url === "/api/setup") {
-    return handleApiSetup(req, res);
+  // Serve static assets for setup UI
+  if (req.url === "/logo.webp") {
+    res.writeHead(200, { "Content-Type": "image/webp", "Cache-Control": "public, max-age=86400" });
+    res.end(LOGO);
+    return;
   }
 
-  // If not configured, show setup UI (redirect to root if on another path)
   if (!isConfigured()) {
     if (req.url !== "/") {
       res.writeHead(302, { Location: "/" });
@@ -768,7 +417,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(getSetupHtml());
+    res.end(SETUP_HTML);
     return;
   }
 
@@ -781,8 +430,104 @@ const server = http.createServer((req, res) => {
   proxyToOpenclaw(req, res);
 });
 
+// WebSocket server for the interactive terminal
+const wss = new WebSocket.Server({ noServer: true });
+
+wss.on("connection", (ws) => {
+  console.log("Terminal WebSocket connected");
+
+  // Only one setup session at a time — kill any existing PTY (e.g. stale tab)
+  if (ptyProcess) {
+    try { ptyProcess.kill(); } catch (e) {}
+    ptyProcess = null;
+  }
+
+  // Spawn openclaw onboard with flags that skip everything except provider/API key selection.
+  // The CLI generates its own gateway token and writes it to openclaw.json.
+  // reconcileConfig() syncs that token to .env when startOpenclaw() runs after setup.
+  ensureConfigDir();
+  ptyProcess = pty.spawn("openclaw", [
+    "onboard",
+    "--flow", "quickstart",
+    "--accept-risk",
+    "--skip-channels",
+    "--skip-skills",
+    "--skip-daemon",
+    "--skip-ui",
+    "--skip-health",
+    "--mode", "local",
+    "--gateway-port", OPENCLAW_PORT.toString(),
+  ], {
+    name: "xterm-256color",
+    cols: 80,
+    rows: 24,
+    cwd: CONFIG_DIR,
+    env: {
+      ...process.env,
+      ...readEnv(),
+      TERM: "xterm-256color",
+    },
+  });
+
+  // PTY output -> WebSocket
+  ptyProcess.onData((data) => {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "output", data }));
+      }
+    } catch (e) {
+      console.error("Error sending PTY output:", e.message);
+    }
+  });
+
+  // PTY exit -> notify client
+  ptyProcess.onExit(({ exitCode }) => {
+    console.log(`openclaw onboard exited with code ${exitCode}`);
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "exit", code: exitCode }));
+      }
+    } catch (e) {
+      console.error("Error sending exit message:", e.message);
+    }
+    ptyProcess = null;
+  });
+
+  // WebSocket input -> PTY
+  ws.on("message", (msg) => {
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed.type === "input" && ptyProcess) {
+        ptyProcess.write(parsed.data);
+      } else if (parsed.type === "resize" && ptyProcess) {
+        ptyProcess.resize(parsed.cols, parsed.rows);
+      }
+    } catch (e) {
+      console.error("Error processing terminal input:", e.message);
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("Terminal WebSocket closed");
+    if (ptyProcess) {
+      try { ptyProcess.kill(); } catch (e) {}
+      ptyProcess = null;
+    }
+  });
+});
+
 // Handle WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Route /api/terminal to the PTY WebSocket server
+  if (url.pathname === "/api/terminal") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+    return;
+  }
+
   if (!isConfigured()) {
     socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
     return;
@@ -810,4 +555,18 @@ if (isConfigured()) {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Setup server listening on port ${PORT}`);
+});
+
+// Graceful shutdown: Docker sends SIGTERM on stop/restart/update.
+// Without this, child processes (gateway, PTY) may get hard-killed
+// mid-write and corrupt config or state files.
+process.on("SIGTERM", () => {
+  console.log("Received SIGTERM, shutting down...");
+  if (ptyProcess) {
+    try { ptyProcess.kill(); } catch (e) {}
+  }
+  if (openclawProcess) {
+    openclawProcess.kill("SIGTERM");
+  }
+  server.close();
 });

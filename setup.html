@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenClaw Setup</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+      background: #0D0D0D;
+      color: #F0EDE8;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .header {
+      flex-shrink: 0;
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 40px 32px 0;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+    }
+
+    .header-logo {
+      flex-shrink: 0;
+      width: 140px;
+      height: 140px;
+      margin-left: -30px;
+    }
+
+    .header-text {
+      flex: 1;
+      margin-top: 35px;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 600;
+      line-height: 1.3;
+      color: #F0EDE8;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #A89F99;
+    }
+
+    .pro-tip {
+      background: #1A1A1A;
+      border: 1px solid #2A2A2A;
+      border-left: 3px solid #FF5A2D;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-top: 0;
+      font-size: 13px;
+      color: #A89F99;
+      line-height: 1.6;
+    }
+
+    .pro-tip strong {
+      color: #F0EDE8;
+      font-weight: 600;
+    }
+
+    .pro-tip em {
+      color: #6B6460;
+      font-style: normal;
+    }
+
+    .mobile-note {
+      display: none;
+      background: #1F1F1F;
+      border: 1px solid #2A2A2A;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 14px;
+      font-size: 13px;
+      color: #A89F99;
+      line-height: 1.5;
+    }
+
+    .terminal-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 20px 32px 40px;
+      min-height: 0;
+    }
+
+    .terminal-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-radius: 10px;
+      border: 1px solid #2A2A2A;
+      overflow: hidden;
+      max-height: 800px;
+      box-shadow: 0 0 0 1px rgba(255,90,45,0.06), 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .titlebar {
+      flex-shrink: 0;
+      height: 36px;
+      background: #1A1A1A;
+      border-bottom: 1px solid #2A2A2A;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 8px;
+    }
+
+    .titlebar-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .titlebar-dot.close { background: #FF5A60; }
+    .titlebar-dot.minimize { background: #FFBE2E; }
+    .titlebar-dot.maximize { background: #27CA40; }
+
+    .titlebar-label {
+      flex: 1;
+      text-align: center;
+      font-family: 'Menlo', 'Monaco', 'Cascadia Code', 'Courier New', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: #6B6460;
+      margin-right: 52px;
+    }
+
+    .terminal-info {
+      flex-shrink: 0;
+      background: #141414;
+      padding: 12px 16px 8px;
+      font-family: 'Menlo', 'Monaco', 'Cascadia Code', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      border-bottom: 1px solid #2A2A2A;
+    }
+
+    .terminal-info .info-heading {
+      color: #D4D0CB;
+      font-weight: bold;
+    }
+
+    .terminal-info .info-dim {
+      color: #6B6460;
+    }
+
+    .terminal-body {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      background: #141414;
+    }
+
+    .terminal-body .xterm {
+      padding: 8px;
+    }
+
+    /* Hide xterm scrollbar — scrollback still works via mouse wheel/trackpad */
+    .terminal-body .xterm-viewport::-webkit-scrollbar { display: none; }
+    .terminal-body .xterm-viewport { scrollbar-width: none; }
+
+    .terminal-footer {
+      flex-shrink: 0;
+      background: #1A1A1A;
+      border-top: 1px solid #2A2A2A;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      min-height: 40px;
+    }
+
+    .footer-message {
+      font-size: 12px;
+      color: #6B6460;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .footer-message.success { color: #34D399; }
+    .footer-message.error { color: #F87171; }
+
+    .footer-hints {
+      font-size: 11px;
+      color: #6B6460;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .footer-hints kbd {
+      background: #2A2A2A;
+      border: 1px solid #3A3A3A;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: inherit;
+      font-size: 10px;
+      color: #A89F99;
+    }
+
+    .footer-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-restart {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: transparent;
+      border: 1px solid #2A2A2A;
+      color: #A89F99;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-restart:hover {
+      border-color: #FF5A2D;
+      color: #FF5A2D;
+    }
+
+    /* Responsive */
+    @media (pointer: coarse) {
+      .mobile-note { display: block; }
+    }
+
+    @media (max-width: 600px) {
+      .header { padding: 12px 16px 0; }
+      .header-top { flex-direction: column; align-items: center; text-align: center; gap: 0; margin-bottom: 0; }
+      .header-logo { display: none; }
+      .header-text { margin-top: 0; }
+      h1 { font-size: 18px; margin-bottom: 2px; }
+      .subtitle { font-size: 13px; margin-bottom: 4px; }
+      .mobile-note { font-size: 12px; padding: 8px 12px; margin-top: 4px; }
+      .pro-tip { display: none; }
+      .terminal-info { display: none; }
+      .terminal-wrapper { padding: 8px 16px 8px; }
+      .terminal-footer { padding: 6px 8px; min-height: 32px; }
+      .btn-restart { padding: 4px 10px; font-size: 11px; }
+      .footer-message { font-size: 11px; }
+      .footer-hints { display: none; }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <img src="/logo.webp" alt="OpenClaw" class="header-logo">
+      <div class="header-text">
+        <h1>Welcome to OpenClaw on Umbrel</h1>
+        <p class="subtitle">Your personal AI assistant. Let's get you set up.</p>
+      </div>
+    </div>
+    <div class="pro-tip">
+      <strong>Tip:</strong> Want to switch providers, add models, or set up Telegram? Just ask OpenClaw in chat — no settings menus needed.
+    </div>
+    <div class="mobile-note">
+      For the best experience, complete setup on a desktop browser.
+    </div>
+  </div>
+
+  <div class="terminal-wrapper">
+    <div class="terminal-card">
+      <div class="titlebar">
+        <div class="titlebar-dot close"></div>
+        <div class="titlebar-dot minimize"></div>
+        <div class="titlebar-dot maximize"></div>
+        <span class="titlebar-label">OpenClaw Setup</span>
+      </div>
+      <div class="terminal-info">
+        <div class="info-heading">Starting OpenClaw setup...</div>
+        <div class="info-dim">You'll be asked to choose an AI provider and enter your API key.</div>
+        <div class="info-dim">This may take a moment to appear. When asked about hooks, you can skip for now.</div>
+      </div>
+      <div class="terminal-body">
+        <div id="terminal"></div>
+      </div>
+      <div class="terminal-footer">
+        <span class="footer-hints">
+          <kbd>↑↓</kbd> Navigate <kbd>Enter</kbd> Select <kbd id="paste-hint">Ctrl+V</kbd> Paste
+        </span>
+        <span class="footer-right">
+          <span id="footer-message" class="footer-message"></span>
+          <!-- blur() before reload prevents browser from restoring focus to button instead of terminal -->
+          <button id="btn-restart" class="btn-restart" onclick="this.blur(); location.reload()">&#x21bb; Start over</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const footerMessage = document.getElementById('footer-message');
+
+      const term = new Terminal({
+        cursorBlink: true,
+        cursorStyle: 'block',
+        fontSize: 13,
+        fontFamily: "'Menlo', 'Monaco', 'Cascadia Code', 'Courier New', monospace",
+        lineHeight: 1.2,
+        theme: {
+          background:    '#141414',
+          foreground:    '#D4D0CB',
+          cursor:        '#FF5A2D',
+          cursorAccent:  '#141414',
+          selectionBackground: 'rgba(255,90,45,0.25)',
+          black:         '#1A1A1A',
+          red:           '#E06C75',
+          green:         '#98C379',
+          yellow:        '#E5C07B',
+          blue:          '#61AFEF',
+          magenta:       '#C678DD',
+          cyan:          '#56B6C2',
+          white:         '#ABB2BF',
+          brightBlack:   '#3D4048',
+          brightRed:     '#F87171',
+          brightGreen:   '#34D399',
+          brightYellow:  '#FBBF24',
+          brightBlue:    '#7BB8F5',
+          brightMagenta: '#D4A4E0',
+          brightCyan:    '#6EC9D4',
+          brightWhite:   '#F0EDE8',
+        },
+        scrollback: 1000,
+        rows: 24,
+        cols: 80,
+      });
+
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(document.getElementById('terminal'));
+      fitAddon.fit();
+
+      // Focus management: the terminal must have focus for arrow keys to work.
+      // We aggressively grab focus because users don't know they need to click
+      // the terminal, and losing focus silently breaks the interactive CLI prompts.
+      term.focus(); // Grab focus on initial load
+
+      // Refocus on any click outside the restart button (which reloads the page)
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.btn-restart')) {
+          term.focus();
+        }
+      });
+
+      // Show correct paste shortcut for OS
+      if (navigator.platform.indexOf('Mac') !== -1) {
+        document.getElementById('paste-hint').textContent = '⌘V';
+      }
+
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal');
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        term.focus(); // Refocus when CLI is ready for input
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'output') {
+            term.write(msg.data);
+          } else if (msg.type === 'exit') {
+            if (msg.code === 0) {
+              term.write('\r\n\x1b[1;32mSetup complete!\x1b[0m You\'ll be redirected to OpenClaw in a moment.\r\n');
+              footerMessage.innerHTML = 'Setup complete! Reloading...';
+              footerMessage.className = 'footer-message success';
+              setTimeout(() => window.location.reload(), 2000);
+            } else {
+              term.write('\r\n\x1b[38;5;242mSetup was interrupted. Click "Start over" below to try again.\x1b[0m\r\n');
+              footerMessage.innerHTML = 'Setup exited unexpectedly.';
+              footerMessage.className = 'footer-message error';
+            }
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        if (!footerMessage.textContent.includes('complete')) {
+          footerMessage.innerHTML = 'Connection lost.';
+          footerMessage.className = 'footer-message error';
+        }
+      };
+
+      ws.onerror = () => {
+        footerMessage.innerHTML = 'Connection error.';
+        footerMessage.className = 'footer-message error';
+      };
+
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      const resizeObserver = new ResizeObserver(() => {
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      });
+      resizeObserver.observe(document.getElementById('terminal'));
+    });
+  </script>
+</body>
+</html>
