@@ -12,7 +12,7 @@ WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
 
 # Install OpenClaw globally from npm
-RUN npm install -g openclaw@2026.3.8
+RUN npm install -g openclaw@2026.3.11
 
 # Redirect future npm global installs to persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global
