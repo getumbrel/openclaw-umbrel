@@ -331,10 +331,19 @@ function proxyToOpenclaw(req, res) {
   // but that's redundant here — our proxy is the only thing that can reach the
   // gateway (it binds to 127.0.0.1 inside the container), and on Umbrel the
   // entire app is already behind Umbrel's auth proxy.
+  // We also strip forwarding headers (X-Forwarded-For, etc.) that Umbrel's
+  // reverse proxy injects — if the gateway sees these from a source not in
+  // gateway.trustedProxies it treats the connection as non-local and rejects it.
   const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
   const headers = { ...req.headers };
   headers["host"] = gatewayHost;
   headers["origin"] = `http://${gatewayHost}`;
+  delete headers["x-forwarded-for"];
+  delete headers["x-forwarded-proto"];
+  delete headers["x-forwarded-host"];
+  delete headers["x-forwarded-port"];
+  delete headers["x-real-ip"];
+  delete headers["forwarded"];
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -375,6 +384,12 @@ function handleUpgrade(req, socket, head) {
     const headers = { ...req.headers };
     headers["host"] = gatewayHost;
     headers["origin"] = `http://${gatewayHost}`;
+    delete headers["x-forwarded-for"];
+    delete headers["x-forwarded-proto"];
+    delete headers["x-forwarded-host"];
+    delete headers["x-forwarded-port"];
+    delete headers["x-real-ip"];
+    delete headers["forwarded"];
     if (token) {
       headers["authorization"] = `Bearer ${token}`;
     }
