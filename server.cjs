@@ -309,19 +309,29 @@ function startOpenclaw() {
 // Read static files at startup
 const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
 const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
+// Loading page shown while the gateway is starting up.  Uses both meta-refresh
+// and a JS reload because Chrome skips meta-refresh when the page URL contains
+// a hash fragment (our token redirect lands at /?token=…#token=…).  The JS
+// setTimeout fires reliably regardless of fragments.
 const LOADING_HTML = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Starting...</title>
 <meta http-equiv="refresh" content="2">
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#0D0D0D;color:#F0EDE8;}</style>
-</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div></body></html>`;
+</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div>
+<script>setTimeout(function(){location.reload()},2500)</script>
+</body></html>`;
 
 function proxyToOpenclaw(req, res) {
   const token = getGatewayToken();
 
-  // For the root path, redirect to include token if not present
+  // Redirect root to a tokenized URL so the Control UI can authenticate.
+  // The token goes in two places:
+  //   ?token=… — prevents a redirect loop (server checks searchParams)
+  //   #token=… — delivers the token to the Control UI JS, which reads auth
+  //              exclusively from the hash fragment, not query params
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (token && req.url === "/" && !url.searchParams.has("token")) {
-    res.writeHead(302, { Location: `/?token=${token}` });
+    res.writeHead(302, { Location: `/?token=${token}#token=${token}` });
     res.end();
     return;
   }
@@ -363,7 +373,7 @@ function proxyToOpenclaw(req, res) {
 
   proxy.on("error", () => {
     // OpenClaw not ready yet, show loading page
-    res.writeHead(200, { "Content-Type": "text/html" });
+    res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-store" });
     res.end(LOADING_HTML);
   });
 
