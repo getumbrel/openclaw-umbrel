@@ -3,6 +3,7 @@ const net = require("net");
 const fs = require("fs");
 const fsp = require("fs").promises;
 const path = require("path");
+const crypto = require("crypto");
 const { spawn, exec } = require("child_process");
 const { promisify } = require("util");
 const execAsync = promisify(exec);
@@ -226,19 +227,34 @@ function reconcileConfig() {
     console.log("Patched config: disabled update check on start");
   }
 
+  // Ensure a gateway auth token exists — the onboard CLI does not generate one,
+  // so without this the Control UI WebSocket fails with "token_missing".
+  if (!config.gateway.auth) config.gateway.auth = {};
+  if (!config.gateway.auth.token) {
+    config.gateway.auth.token = crypto.randomBytes(24).toString("hex");
+    changed = true;
+    console.log("Patched config: generated gateway auth token");
+  }
+
+  // Required since openclaw 2026.3.7 when auth is configured.
+  // Always forced to "token" — the proxy only speaks Bearer token auth.
+  if (config.gateway.auth.mode !== "token") {
+    config.gateway.auth.mode = "token";
+    changed = true;
+    console.log("Patched config: set gateway auth mode to token");
+  }
+
   if (changed) {
     writeConfig(config);
   }
 
   // Sync gateway token to .env so the proxy always has it
-  const token = config.gateway && config.gateway.auth && config.gateway.auth.token;
-  if (token) {
-    const env = readEnv();
-    if (env.OPENCLAW_GATEWAY_TOKEN !== token) {
-      env.OPENCLAW_GATEWAY_TOKEN = token;
-      writeEnv(env);
-      console.log("Synced gateway token to .env");
-    }
+  const token = config.gateway.auth.token;
+  const env = readEnv();
+  if (env.OPENCLAW_GATEWAY_TOKEN !== token) {
+    env.OPENCLAW_GATEWAY_TOKEN = token;
+    writeEnv(env);
+    console.log("Synced gateway token to .env");
   }
 }
 
@@ -443,8 +459,8 @@ wss.on("connection", (ws) => {
   }
 
   // Spawn openclaw onboard with flags that skip everything except provider/API key selection.
-  // The CLI generates its own gateway token and writes it to openclaw.json.
-  // reconcileConfig() syncs that token to .env when startOpenclaw() runs after setup.
+  // The CLI does NOT generate a gateway token — reconcileConfig() generates one and
+  // syncs it to .env when startOpenclaw() runs after setup.
   ensureConfigDir();
   ptyProcess = pty.spawn("openclaw", [
     "onboard",
