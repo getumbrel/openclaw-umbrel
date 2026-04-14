@@ -16,6 +16,12 @@ const ENV_FILE = path.join(CONFIG_DIR, ".env");
 const PORT = parseInt(process.env.SETUP_PORT || "18789");
 const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
 const SKELETON_DIR = "/home-skeleton";
+// Anti-CSWSH token for the setup terminal WebSocket. Browsers don't enforce the
+// same-origin policy on WebSocket upgrades, so without this any site could connect
+// to /api/terminal and hijack the onboarding PTY. We embed APP_SEED (per-user
+// secret from umbrelOS) in the served HTML and require it on the WS URL — the
+// same-origin policy prevents cross-origin pages from reading it.
+const SETUP_TOKEN = process.env.APP_SEED || "";
 
 let openclawProcess = null;
 let openclawStarting = false;
@@ -458,7 +464,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(SETUP_HTML);
+    res.end(SETUP_HTML.replace("__SETUP_TOKEN__", SETUP_TOKEN));
     return;
   }
 
@@ -563,6 +569,14 @@ server.on("upgrade", (req, socket, head) => {
 
   // Route /api/terminal to the PTY WebSocket server
   if (url.pathname === "/api/terminal") {
+    // Validate anti-CSWSH token (see SETUP_TOKEN comment above)
+    const provided = url.searchParams.get("token") || "";
+    if (!SETUP_TOKEN || provided.length !== SETUP_TOKEN.length ||
+        !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(SETUP_TOKEN))) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });

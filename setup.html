@@ -380,7 +380,7 @@
 
 
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal');
+      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal?token=__SETUP_TOKEN__');
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));

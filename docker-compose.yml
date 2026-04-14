@@ -5,6 +5,8 @@ services:
     container_name: openclaw
     restart: unless-stopped
     init: true
+    environment:
+      APP_SEED: ${APP_SEED:-dev} # Provided by umbrelOS; fallback for local dev
     ports:
       - "18789:18789"
     volumes:
