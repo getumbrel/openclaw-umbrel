@@ -499,6 +499,7 @@ wss.on("connection", (ws) => {
     "--accept-risk",
     "--skip-channels",
     "--skip-skills",
+    "--skip-search",
     "--skip-daemon",
     "--skip-ui",
     "--skip-health",
