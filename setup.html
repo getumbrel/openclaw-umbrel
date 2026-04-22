@@ -12,6 +12,7 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
       background: #0D0D0D;
       color: #F0EDE8;
+      min-height: 100vh;
       height: 100vh;
       display: flex;
       flex-direction: column;
@@ -90,6 +91,75 @@
       font-size: 13px;
       color: #A89F99;
       line-height: 1.5;
+    }
+
+    .mobile-toolbar {
+      display: none;
+      flex-shrink: 0;
+      background: #1A1A1A;
+      border-top: 1px solid #2A2A2A;
+      padding: 10px 12px 12px;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .mobile-input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mobile-input {
+      flex: 1;
+      min-width: 0;
+      background: #141414;
+      border: 1px solid #2A2A2A;
+      border-radius: 8px;
+      color: #F0EDE8;
+      padding: 10px 12px;
+      font: inherit;
+    }
+
+    .mobile-input::placeholder {
+      color: #6B6460;
+    }
+
+    .mobile-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-areas:
+        "escape backspace space enter"
+        "left up down right";
+      gap: 8px;
+    }
+
+    .mobile-key-escape { grid-area: escape; }
+    .mobile-key-backspace { grid-area: backspace; }
+    .mobile-key-enter { grid-area: enter; }
+    .mobile-key-space { grid-area: space; }
+    .mobile-key-left { grid-area: left; }
+    .mobile-key-up { grid-area: up; }
+    .mobile-key-down { grid-area: down; }
+    .mobile-key-right { grid-area: right; }
+
+    .mobile-key {
+      min-height: 40px;
+      padding: 8px 10px;
+      background: #141414;
+      border: 1px solid #2A2A2A;
+      border-radius: 8px;
+      color: #D4D0CB;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+
+    .mobile-key:active {
+      background: #202020;
+      border-color: #FF5A2D;
+      color: #FF5A2D;
     }
 
     .terminal-wrapper {
@@ -171,7 +241,12 @@
       background: #141414;
     }
 
+    #terminal {
+      height: 100%;
+    }
+
     .terminal-body .xterm {
+      height: 100%;
       padding: 8px;
     }
 
@@ -249,9 +324,11 @@
     /* Responsive */
     @media (pointer: coarse) {
       .mobile-note { display: block; }
+      .mobile-toolbar { display: flex; }
     }
 
     @media (max-width: 600px) {
+      body { min-height: 100svh; min-height: 100dvh; height: 100dvh; overflow: hidden; }
       .header { padding: 12px 16px 0; }
       .header-top { flex-direction: column; align-items: center; text-align: center; gap: 0; margin-bottom: 0; }
       .header-logo { display: none; }
@@ -261,8 +338,15 @@
       .mobile-note { font-size: 12px; padding: 8px 12px; margin-top: 4px; }
       .pro-tip { display: none; }
       .terminal-info { display: none; }
-      .terminal-wrapper { padding: 8px 16px 8px; }
-      .terminal-footer { padding: 6px 8px; min-height: 32px; }
+      .terminal-wrapper { flex: 1; min-height: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+      .terminal-card { flex: 1; min-height: 0; max-height: none; }
+      .terminal-body { min-height: clamp(240px, 44vh, 420px); }
+      .mobile-toolbar { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
+      .mobile-input-row { gap: 6px; }
+      .mobile-input { padding: 9px 10px; font-size: 16px; }
+      .mobile-controls { gap: 6px; }
+      .mobile-key { min-height: 34px; padding: 6px 6px; font-size: 12px; }
+      .terminal-footer { padding: 4px 8px; min-height: 28px; }
       .btn-restart { padding: 4px 10px; font-size: 11px; }
       .footer-message { font-size: 11px; }
       .footer-hints { display: none; }
@@ -283,7 +367,7 @@
       <strong>Tip:</strong> Want to switch providers, add models, or set up Telegram? Just ask OpenClaw in chat — no settings menus needed.
     </div>
     <div class="mobile-note">
-      For the best experience, complete setup on a desktop browser.
+      On mobile, use the keyboard field and navigation buttons below the terminal.
     </div>
   </div>
 
@@ -303,6 +387,22 @@
       <div class="terminal-body">
         <div id="terminal"></div>
       </div>
+      <div class="mobile-toolbar">
+        <div class="mobile-input-row">
+          <input id="mobile-input" class="mobile-input" type="text" placeholder="Tap here to type" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+          <button id="mobile-keyboard" class="mobile-key" type="button">Keyboard</button>
+        </div>
+        <div class="mobile-controls">
+          <button class="mobile-key mobile-key-escape" type="button" data-key="escape">Esc</button>
+          <button class="mobile-key mobile-key-backspace" type="button" data-key="backspace">⌫</button>
+          <button class="mobile-key mobile-key-enter" type="button" data-key="enter">Enter</button>
+          <button class="mobile-key mobile-key-space" type="button" data-key="space">Space</button>
+          <button class="mobile-key mobile-key-left" type="button" data-key="arrow-left">←</button>
+          <button class="mobile-key mobile-key-up" type="button" data-key="arrow-up">↑</button>
+          <button class="mobile-key mobile-key-down" type="button" data-key="arrow-down">↓</button>
+          <button class="mobile-key mobile-key-right" type="button" data-key="arrow-right">→</button>
+        </div>
+      </div>
       <div class="terminal-footer">
         <span class="footer-hints">
           <kbd>↑↓</kbd> Navigate <kbd>Enter</kbd> Select <kbd id="paste-hint">Ctrl+V</kbd> Paste
@@ -321,6 +421,16 @@
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const footerMessage = document.getElementById('footer-message');
+      const terminalElement = document.getElementById('terminal');
+      const terminalBody = document.querySelector('.terminal-body');
+      const mobileInput = document.getElementById('mobile-input');
+      const mobileKeyboardButton = document.getElementById('mobile-keyboard');
+      const mobileButtons = Array.from(document.querySelectorAll('.mobile-key[data-key]'));
+      const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+      let hasFocusedOnLoad = false;
+      let hasFocusedAfterFirstOutput = false;
+      let fitTimer = null;
+      let ws;
 
       const term = new Terminal({
         cursorBlink: true,
@@ -358,18 +468,106 @@
 
       const fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
-      term.open(document.getElementById('terminal'));
+      term.open(terminalElement);
       fitAddon.fit();
+
+      const focusDesktopTerminal = () => {
+        term.focus();
+        const helperTextarea = terminalElement.querySelector('.xterm-helper-textarea');
+        if (helperTextarea) {
+          try {
+            helperTextarea.focus({ preventScroll: true });
+          } catch (e) {
+            helperTextarea.focus();
+          }
+        }
+        setTimeout(() => {
+          term.focus();
+        }, 0);
+      };
+
+      const focusMobileInput = () => {
+        if (!mobileInput) {
+          return;
+        }
+        try {
+          mobileInput.focus({ preventScroll: true });
+        } catch (e) {
+          mobileInput.focus();
+        }
+      };
+
+      const syncTerminalSize = () => {
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      };
+
+      const scheduleTerminalFit = () => {
+        if (fitTimer) {
+          clearTimeout(fitTimer);
+        }
+        fitTimer = setTimeout(() => {
+          syncTerminalSize();
+        }, 30);
+      };
+
+      const scheduleDesktopFocus = () => {
+        if (isCoarsePointer) {
+          return;
+        }
+        focusDesktopTerminal();
+        requestAnimationFrame(() => {
+          focusDesktopTerminal();
+        });
+        setTimeout(() => {
+          focusDesktopTerminal();
+        }, 50);
+        setTimeout(() => {
+          focusDesktopTerminal();
+        }, 250);
+      };
 
       // Focus management: the terminal must have focus for arrow keys to work.
       // We aggressively grab focus because users don't know they need to click
       // the terminal, and losing focus silently breaks the interactive CLI prompts.
-      term.focus(); // Grab focus on initial load
+      if (!isCoarsePointer) {
+        scheduleDesktopFocus();
+        hasFocusedOnLoad = true;
+      }
+
+      window.addEventListener('load', () => {
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      });
 
       // Refocus on any click outside the restart button (which reloads the page)
-      document.addEventListener('click', (e) => {
-        if (!e.target.closest('.btn-restart')) {
-          term.focus();
+      document.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.btn-restart') || e.target.closest('.mobile-toolbar')) {
+          return;
+        }
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      }, true);
+
+      terminalElement.addEventListener('pointerdown', () => {
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      }, true);
+
+      window.addEventListener('focus', () => {
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !isCoarsePointer) {
+          scheduleDesktopFocus();
         }
       });
 
@@ -378,13 +576,106 @@
         document.getElementById('paste-hint').textContent = '⌘V';
       }
 
+      const getArrowSequence = (direction) => {
+        const suffix = {
+          'arrow-up': 'A',
+          'arrow-down': 'B',
+          'arrow-right': 'C',
+          'arrow-left': 'D',
+        }[direction];
+        const useApplicationMode = !!(term.modes && term.modes.applicationCursorKeysMode);
+        return useApplicationMode ? `\u001bO${suffix}` : `\u001b[${suffix}`;
+      };
+
+      const controlSequences = {
+        enter: '\r',
+        escape: '\u001b',
+        space: ' ',
+        backspace: '\u007f',
+      };
+
+      const sendInput = (data) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      };
+
+      if (mobileInput) {
+        mobileInput.addEventListener('input', (event) => {
+          const value = event.target.value;
+          if (!value) {
+            return;
+          }
+          sendInput(value);
+          event.target.value = '';
+          scheduleTerminalFit();
+        });
+
+        mobileInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            sendInput('\r');
+            event.target.value = '';
+            scheduleTerminalFit();
+          }
+        });
+      }
+
+      if (mobileKeyboardButton) {
+        let keyboardButtonLastPress = 0;
+        const handleKeyboardPress = (event) => {
+          const now = Date.now();
+          if (now - keyboardButtonLastPress < 250) {
+            event.preventDefault();
+            return;
+          }
+          keyboardButtonLastPress = now;
+          event.preventDefault();
+          focusMobileInput();
+        };
+
+        mobileKeyboardButton.addEventListener('pointerdown', handleKeyboardPress);
+        mobileKeyboardButton.addEventListener('touchstart', handleKeyboardPress, { passive: false });
+        mobileKeyboardButton.addEventListener('click', handleKeyboardPress);
+      }
+
+      mobileButtons.forEach((button) => {
+        let lastPress = 0;
+        const handleButtonPress = (event) => {
+          const now = Date.now();
+          if (now - lastPress < 250) {
+            event.preventDefault();
+            return;
+          }
+          lastPress = now;
+          event.preventDefault();
+          const key = button.dataset.key;
+          const data = key.startsWith('arrow-') ? getArrowSequence(key) : controlSequences[key];
+          if (data) {
+            sendInput(data);
+          }
+          scheduleTerminalFit();
+          if (!isCoarsePointer) {
+            scheduleDesktopFocus();
+          }
+        };
+
+        button.addEventListener('pointerdown', handleButtonPress);
+        button.addEventListener('touchstart', handleButtonPress, { passive: false });
+        button.addEventListener('click', handleButtonPress);
+      });
+
 
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal?token=__SETUP_TOKEN__');
+      ws = new WebSocket(proto + '//' + location.host + '/api/terminal?token=__SETUP_TOKEN__');
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        term.focus(); // Refocus when CLI is ready for input
+        if (!isCoarsePointer && !hasFocusedOnLoad) {
+          scheduleDesktopFocus();
+          hasFocusedOnLoad = true;
+        }
+        scheduleTerminalFit();
       };
 
       ws.onmessage = (event) => {
@@ -392,6 +683,11 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             term.write(msg.data);
+            scheduleTerminalFit();
+            if (!isCoarsePointer && !hasFocusedAfterFirstOutput) {
+              scheduleDesktopFocus();
+              hasFocusedAfterFirstOutput = true;
+            }
           } else if (msg.type === 'exit') {
             if (msg.code === 0) {
               term.write('\r\n\x1b[1;32mSetup complete!\x1b[0m You\'ll be redirected to OpenClaw in a moment.\r\n');
@@ -420,18 +716,32 @@
       };
 
       term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data }));
-        }
+        sendInput(data);
       });
 
       const resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        }
+        scheduleTerminalFit();
       });
       resizeObserver.observe(document.getElementById('terminal'));
+      resizeObserver.observe(terminalBody);
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+          scheduleTerminalFit();
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+          scheduleTerminalFit();
+        });
+      }
+
+      if (isCoarsePointer) {
+        requestAnimationFrame(() => {
+          scheduleTerminalFit();
+        });
+        setTimeout(() => {
+          scheduleTerminalFit();
+        }, 150);
+      }
     });
   </script>
 </body>
