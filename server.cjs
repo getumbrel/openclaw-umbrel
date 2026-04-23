@@ -315,17 +315,70 @@ function startOpenclaw() {
 // Read static files at startup
 const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
 const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
-// Loading page shown while the gateway is starting up.  Uses both meta-refresh
-// and a JS reload because Chrome skips meta-refresh when the page URL contains
-// a hash fragment (our token redirect lands at /?token=…#token=…).  The JS
-// setTimeout fires reliably regardless of fragments.
+// Loading page shown while the gateway is starting up.
 const LOADING_HTML = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Starting...</title>
-<meta http-equiv="refresh" content="2">
-<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#0D0D0D;color:#F0EDE8;}</style>
-</head><body><div><h1>Starting OpenClaw...</h1><p>Please wait, this may take a moment.</p></div>
-<script>setTimeout(function(){location.reload()},2500)</script>
-</body></html>`;
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0D0D0D">
+<meta name="color-scheme" content="dark">
+<meta name="openclaw-loading" content="1">
+<title>Starting OpenClaw...</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0D0D0D;color:#F0EDE8}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:max(24px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));overflow:hidden}
+.shell{width:min(100%,420px)}
+.card{background:linear-gradient(180deg,rgba(31,31,31,.96),rgba(20,20,20,.98));border:1px solid #2A2A2A;border-radius:20px;padding:24px 20px;box-shadow:0 20px 50px rgba(0,0,0,.45),0 0 0 1px rgba(255,90,45,.06);text-align:center}
+.logo{width:72px;height:72px;display:block;margin:0 auto 18px;object-fit:contain}
+h1{margin:0 0 10px;font-size:clamp(24px,5vw,30px);line-height:1.15}
+p{margin:0;color:#A89F99;font-size:15px;line-height:1.6}
+.status{margin-top:20px;display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:999px;background:#141414;border:1px solid #2A2A2A;color:#D4D0CB;font-size:14px}
+.spinner{width:16px;height:16px;border:2px solid rgba(240,237,232,.18);border-top-color:#FF5A2D;border-radius:999px;animation:spin .85s linear infinite}
+.progress{margin-top:18px;height:6px;border-radius:999px;background:#141414;overflow:hidden;border:1px solid #252525}
+.progress::before{content:"";display:block;width:42%;height:100%;border-radius:999px;background:linear-gradient(90deg,#FF5A2D,#FF8A65);animation:slide 1.4s ease-in-out infinite}
+.hint{margin-top:14px;font-size:12px;color:#6B6460}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slide{0%{transform:translateX(-120%)}60%{transform:translateX(170%)}100%{transform:translateX(170%)}}
+@media (max-width:480px){.card{padding:22px 16px;border-radius:18px}.logo{width:64px;height:64px;margin-bottom:16px}p{font-size:14px}.status{width:100%;justify-content:center;box-sizing:border-box}}
+</style>
+</head>
+<body>
+<div class="shell">
+<div class="card">
+<img class="logo" src="/logo.webp" alt="OpenClaw">
+<h1>Starting OpenClaw</h1>
+<p>Please wait while the gateway finishes booting. You’ll be redirected automatically as soon as it’s ready.</p>
+<div class="status"><span class="spinner"></span><span id="status-text">Checking availability…</span></div>
+<div class="progress"></div>
+<div class="hint">This usually only takes a moment.</div>
+</div>
+</div>
+<script>
+(()=>{
+const statusText=document.getElementById('status-text');
+const marker='name="openclaw-loading"';
+let attempts=0;
+async function checkReady(){
+  attempts+=1;
+  try{
+    const response=await fetch(location.href.split('#')[0],{cache:'no-store',credentials:'same-origin'});
+    const text=await response.text();
+    if(!text.includes(marker)){
+      location.reload();
+      return;
+    }
+    statusText.textContent=attempts>3?'Still starting…':'Checking availability…';
+  }catch(_error){
+    statusText.textContent='Still starting…';
+  }
+  setTimeout(checkReady,1200);
+}
+setTimeout(checkReady,900);
+})();
+</script>
+</body>
+</html>`;
 
 function proxyToOpenclaw(req, res) {
   const token = getGatewayToken();
