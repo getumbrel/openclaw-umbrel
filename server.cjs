@@ -69,6 +69,31 @@ function ensureConfigDir() {
   }
 }
 
+function ensureShellCompletionBypass() {
+  const completionDir = path.join(CONFIG_DIR, "completions");
+  const completionPath = path.join(completionDir, "openclaw.bash");
+  const bashrcPath = path.join(process.env.HOME, ".bashrc");
+
+  fs.mkdirSync(completionDir, { recursive: true });
+  if (!fs.existsSync(completionPath)) {
+    fs.writeFileSync(completionPath, "# OpenClaw tab-completion disabled in Umbrel.\n");
+  }
+
+  let bashrc = "";
+  try {
+    bashrc = fs.readFileSync(bashrcPath, "utf8");
+  } catch {}
+
+  if (!bashrc.includes("# OpenClaw Completion")) {
+    // OpenClaw QuickStart auto-generates shell tab-completion when it looks
+    // unconfigured. That is not useful in Umbrel's browser terminal and can
+    // take ~30s. The marker plus placeholder cache makes OpenClaw skip that
+    // setup step without sourcing or executing anything on shell startup.
+    const prefix = bashrc && !bashrc.endsWith("\n") ? "\n" : "";
+    fs.appendFileSync(bashrcPath, `${prefix}\n# OpenClaw Completion\n`);
+  }
+}
+
 // Check if a directory is empty
 async function isDirEmpty(dirPath) {
   try {
@@ -277,7 +302,7 @@ async function runDoctor() {
   }
 }
 
-function startOpenclaw() {
+function startOpenclaw({ repair = true } = {}) {
   // Guard against re-entry: runDoctor() is async, so without this flag every
   // incoming request would see openclawProcess === null and spawn another doctor run.
   if (openclawProcess || openclawStarting) {
@@ -287,10 +312,7 @@ function startOpenclaw() {
   openclawStarting = true;
   reconcileConfig();
 
-  // .finally() ensures the gateway starts even if doctor fails or rejects —
-  // a degraded gateway is better than no gateway.
-  console.log("Running openclaw doctor before gateway start...");
-  runDoctor().finally(() => {
+  const spawnGateway = () => {
     openclawStarting = false;
     console.log("Starting OpenClaw gateway...");
     openclawProcess = spawn(
@@ -309,7 +331,22 @@ function startOpenclaw() {
       console.log(`OpenClaw exited with code ${code}`);
       openclawProcess = null;
     });
-  });
+  };
+
+  if (!repair) {
+    // Fresh onboarding just wrote this config, so avoid a full repair/migration
+    // pass before the first gateway start. We still run doctor on normal
+    // already-configured container starts where upgrade or stale-state repairs
+    // are plausible.
+    console.log("Skipping openclaw doctor after fresh onboarding");
+    spawnGateway();
+    return;
+  }
+
+  // .finally() ensures the gateway starts even if doctor fails or rejects —
+  // a degraded gateway is better than no gateway.
+  console.log("Running openclaw doctor before gateway start...");
+  runDoctor().finally(spawnGateway);
 }
 
 // Read static files at startup
@@ -389,8 +426,13 @@ function proxyToOpenclaw(req, res) {
   //   #token=… — delivers the token to the Control UI JS, which reads auth
   //              exclusively from the hash fragment, not query params
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (token && req.url === "/" && !url.searchParams.has("token")) {
-    res.writeHead(302, { Location: `/?token=${token}#token=${token}` });
+  if (token && url.pathname === "/" && url.searchParams.get("token") !== token) {
+    // If setup generated or repaired a token while the browser still has an
+    // older dashboard URL, force the URL hash back in sync. The Control UI reads
+    // auth from the hash, so a stale token there causes WebSocket auth failures
+    // even though the proxy injects the current Bearer token.
+    const encodedToken = encodeURIComponent(token);
+    res.writeHead(302, { Location: `/?token=${encodedToken}#token=${encodedToken}` });
     res.end();
     return;
   }
@@ -521,6 +563,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (ptyProcess) {
+    // OpenClaw writes config before QuickStart fully exits. Keep the browser on
+    // the terminal until onboarding is done so the gateway never starts against
+    // config/auth files that OpenClaw may still rewrite.
+    if (req.url !== "/") {
+      res.writeHead(302, { Location: "/" });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(SETUP_HTML.replace("__SETUP_TOKEN__", SETUP_TOKEN));
+    return;
+  }
+
   // If configured but OpenClaw not running, start it
   if (!openclawProcess) {
     startOpenclaw();
@@ -546,6 +602,7 @@ wss.on("connection", (ws) => {
   // The CLI does NOT generate a gateway token — reconcileConfig() generates one and
   // syncs it to .env when startOpenclaw() runs after setup.
   ensureConfigDir();
+  ensureShellCompletionBypass();
   ptyProcess = pty.spawn("openclaw", [
     "onboard",
     "--flow", "quickstart",
@@ -566,6 +623,7 @@ wss.on("connection", (ws) => {
     env: {
       ...process.env,
       ...readEnv(),
+      SHELL: "/bin/bash",
       TERM: "xterm-256color",
     },
   });
@@ -592,6 +650,11 @@ wss.on("connection", (ws) => {
       console.error("Error sending exit message:", e.message);
     }
     ptyProcess = null;
+
+    if (exitCode === 0 && isConfigured() && !openclawProcess) {
+      console.log("OpenClaw onboarding completed, starting gateway...");
+      startOpenclaw({ repair: false });
+    }
   });
 
   // WebSocket input -> PTY
@@ -638,6 +701,11 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   if (!isConfigured()) {
+    socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+    return;
+  }
+
+  if (ptyProcess) {
     socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
     return;
   }

@@ -12,7 +12,7 @@ WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
 
 # Install OpenClaw globally from npm
-RUN npm install -g openclaw@2026.4.21
+RUN npm install -g openclaw@2026.4.27
 
 # Redirect future npm global installs to persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global
@@ -34,9 +34,9 @@ RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/instal
 # then kills the gateway process by its process title ("openclaw-gateway").
 # The container's `restart: unless-stopped` policy brings everything back.
 # `|| true` prevents pkill's non-zero exit code from making the restart look like
-# a failure to the agent. The pkill target matches the gateway's runtime process
-# title, not the binary name — if the OpenClaw version changes, verify with `ps aux`.
-RUN printf '#!/bin/bash\n# Skip flags (e.g. --user) to find the actual subcommand\ncmd=""\nfor arg in "$@"; do\n  case "$arg" in\n    -*) ;;\n    *) cmd="$arg"; break ;;\n  esac\ndone\ncase "$cmd" in\n  restart|stop) pkill -f "openclaw-gateway" 2>/dev/null || true ;;\n  start) echo "openclaw-gateway is managed by the container" ;;\n  *) exit 0 ;;\nesac\n' | sudo tee /usr/local/bin/systemctl \
+# a failure to the agent. Anchor the pkill match so it only catches the gateway
+# process, not this shim's own argv (`systemctl ... openclaw-gateway.service`).
+RUN printf '#!/bin/bash\n# Skip flags (e.g. --user) to find the actual subcommand\ncmd=""\nfor arg in "$@"; do\n  case "$arg" in\n    -*) ;;\n    *) cmd="$arg"; break ;;\n  esac\ndone\ncase "$cmd" in\n  restart|stop) pkill -f "^openclaw-gateway([[:space:]]|$)" 2>/dev/null || true ;;\n  start) echo "openclaw-gateway is managed by the container" ;;\n  *) exit 0 ;;\nesac\n' | sudo tee /usr/local/bin/systemctl \
     && sudo chmod +x /usr/local/bin/systemctl
 
 # Replace apt/apt-get with script telling openclaw to use brew
