@@ -674,32 +674,16 @@
       }
 
       if (mobileKeyboardButton) {
-        let keyboardButtonLastPress = 0;
         const handleKeyboardPress = (event) => {
-          const now = Date.now();
-          if (now - keyboardButtonLastPress < 250) {
-            event.preventDefault();
-            return;
-          }
-          keyboardButtonLastPress = now;
           event.preventDefault();
           focusMobileInput();
         };
 
-        mobileKeyboardButton.addEventListener('pointerdown', handleKeyboardPress);
-        mobileKeyboardButton.addEventListener('touchstart', handleKeyboardPress, { passive: false });
         mobileKeyboardButton.addEventListener('click', handleKeyboardPress);
       }
 
       mobileButtons.forEach((button) => {
-        let lastPress = 0;
         const handleButtonPress = (event) => {
-          const now = Date.now();
-          if (now - lastPress < 250) {
-            event.preventDefault();
-            return;
-          }
-          lastPress = now;
           event.preventDefault();
           const key = button.dataset.key;
           const data = key.startsWith('arrow-') ? getArrowSequence(key) : controlSequences[key];
@@ -712,8 +696,6 @@
           }
         };
 
-        button.addEventListener('pointerdown', handleButtonPress);
-        button.addEventListener('touchstart', handleButtonPress, { passive: false });
         button.addEventListener('click', handleButtonPress);
       });
 
