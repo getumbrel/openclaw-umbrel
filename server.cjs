@@ -352,7 +352,9 @@ function startOpenclaw({ repair = true } = {}) {
 // Read static files at startup
 const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
 const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
-// Loading page shown while the gateway is starting up.
+// Loading page shown while the gateway is starting up. Keep the refresh in JS:
+// Chrome skips meta-refresh when the URL contains a hash fragment, and our
+// token redirect lands at /?token=...#token=....
 const LOADING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -360,7 +362,6 @@ const LOADING_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0D0D0D">
 <meta name="color-scheme" content="dark">
-<meta name="openclaw-loading" content="1">
 <title>Starting OpenClaw...</title>
 <style>
 html,body{margin:0;min-height:100%;background:#0D0D0D;color:#F0EDE8}
@@ -386,34 +387,12 @@ p{margin:0;color:#A89F99;font-size:15px;line-height:1.6}
 <img class="logo" src="/logo.webp" alt="OpenClaw">
 <h1>Starting OpenClaw</h1>
 <p>Please wait while the gateway finishes booting. You’ll be redirected automatically as soon as it’s ready.</p>
-<div class="status"><span class="spinner"></span><span id="status-text">Checking availability…</span></div>
+<div class="status"><span class="spinner"></span><span>Checking availability…</span></div>
 <div class="progress"></div>
 <div class="hint">This usually only takes a moment.</div>
 </div>
 </div>
-<script>
-(()=>{
-const statusText=document.getElementById('status-text');
-const marker='name="openclaw-loading"';
-let attempts=0;
-async function checkReady(){
-  attempts+=1;
-  try{
-    const response=await fetch(location.href.split('#')[0],{cache:'no-store',credentials:'same-origin'});
-    const text=await response.text();
-    if(!text.includes(marker)){
-      location.reload();
-      return;
-    }
-    statusText.textContent=attempts>3?'Still starting…':'Checking availability…';
-  }catch(_error){
-    statusText.textContent='Still starting…';
-  }
-  setTimeout(checkReady,1200);
-}
-setTimeout(checkReady,900);
-})();
-</script>
+<script>setTimeout(function(){location.reload()},2500)</script>
 </body>
 </html>`;
 
