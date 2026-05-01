@@ -583,6 +583,7 @@
       // Focus management: the terminal must have focus for arrow keys to work.
       // We aggressively grab focus because users don't know they need to click
       // the terminal, and losing focus silently breaks the interactive CLI prompts.
+      // On touch devices, the hidden mobile input owns keyboard focus instead.
       if (!isCoarsePointer) {
         scheduleDesktopFocus();
         hasFocusedOnLoad = true;
