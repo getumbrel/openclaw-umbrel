@@ -104,32 +104,28 @@
       gap: 8px;
     }
 
-    .mobile-input-row {
-      display: flex;
-      gap: 8px;
-    }
-
+    /* Mobile browsers need a real focused input to open the software keyboard.
+       Keep it invisible so xterm remains the only visible source of typed text. */
     .mobile-input {
-      flex: 1;
-      min-width: 0;
-      background: #141414;
-      border: 1px solid #2A2A2A;
-      border-radius: 8px;
-      color: #F0EDE8;
-      padding: 10px 12px;
-      font: inherit;
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-100vw);
     }
 
-    .mobile-input::placeholder {
-      color: #6B6460;
+    .mobile-type-button {
+      width: 100%;
+      min-height: 42px;
     }
 
     .mobile-controls {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       grid-template-areas:
-        "escape backspace space enter"
-        "left up down right";
+        "left up down right"
+        "escape space backspace enter";
       gap: 8px;
     }
 
@@ -394,8 +390,7 @@
       .terminal-card { flex: 1; min-height: 0; max-height: none; }
       .terminal-body { min-height: clamp(240px, 44vh, 420px); }
       .mobile-toolbar { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
-      .mobile-input-row { gap: 6px; }
-      .mobile-input { padding: 9px 10px; font-size: 16px; }
+      .mobile-type-button { min-height: 38px; }
       .mobile-controls { gap: 6px; }
       .mobile-key { min-height: 34px; padding: 6px 6px; font-size: 12px; }
       .terminal-footer { padding: 4px 8px; min-height: 28px; }
@@ -419,7 +414,7 @@
       <strong>Tip:</strong> Want to switch providers, add models, or set up Telegram? Just ask OpenClaw in chat — no settings menus needed.
     </div>
     <div class="mobile-note">
-      On mobile, use the keyboard field and navigation buttons below the terminal.
+      On mobile, use Tap to type and the navigation buttons below the terminal.
     </div>
   </div>
 
@@ -440,10 +435,9 @@
         <div id="terminal"></div>
       </div>
       <div class="mobile-toolbar">
-        <div class="mobile-input-row">
-          <input id="mobile-input" class="mobile-input" type="password" placeholder="Tap here to type" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
-          <button id="mobile-keyboard" class="mobile-key" type="button">Keyboard</button>
-        </div>
+        <!-- Keyboard bridge only: typed characters are forwarded to the terminal below. -->
+        <input id="mobile-input" class="mobile-input" type="text" tabindex="-1" aria-label="Terminal input" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+        <button id="mobile-keyboard" class="mobile-key mobile-type-button" type="button">Tap to type</button>
         <div class="mobile-controls">
           <button class="mobile-key mobile-key-escape" type="button" data-key="escape">Esc</button>
           <button class="mobile-key mobile-key-backspace" type="button" data-key="backspace">⌫</button>
@@ -653,6 +647,8 @@
       };
 
       if (mobileInput) {
+        // The hidden input only exists to summon mobile keyboards. Forward each
+        // character immediately so the terminal remains the source of truth.
         mobileInput.addEventListener('input', (event) => {
           const value = event.target.value;
           if (!value) {
@@ -669,6 +665,11 @@
             sendInput('\r');
             event.target.value = '';
             scheduleTerminalFit();
+          } else if (event.key === 'Backspace') {
+            event.preventDefault();
+            sendInput(controlSequences.backspace);
+            event.target.value = '';
+            scheduleTerminalFit();
           }
         });
       }
@@ -683,6 +684,8 @@
       }
 
       mobileButtons.forEach((button) => {
+        // Use click only for toolbar buttons; adding touch/pointer handlers too
+        // can double-send controls on mobile browsers.
         const handleButtonPress = (event) => {
           event.preventDefault();
           const key = button.dataset.key;
