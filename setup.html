@@ -516,6 +516,11 @@
       term.loadAddon(fitAddon);
       term.open(terminalElement);
       fitAddon.fit();
+      // Compact mobile layout hides the terminal info header to preserve space.
+      // Keep the terminal itself nonblank while OpenClaw does quiet startup work.
+      if (window.matchMedia('(max-width: 600px)').matches) {
+        term.write('\x1b[38;5;202mStarting OpenClaw setup...\x1b[0m\r\n\x1b[38;5;242mThis may take a moment before the first prompt appears.\x1b[0m\r\n');
+      }
 
       const focusDesktopTerminal = () => {
         term.focus();
