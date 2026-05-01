@@ -12,6 +12,7 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
       background: #0D0D0D;
       color: #F0EDE8;
+      min-height: 100vh;
       height: 100vh;
       height: 100dvh;
       display: flex;
@@ -91,6 +92,71 @@
       font-size: 13px;
       color: #A89F99;
       line-height: 1.5;
+    }
+
+    .mobile-toolbar {
+      display: none;
+      flex-shrink: 0;
+      background: #1A1A1A;
+      border-top: 1px solid #2A2A2A;
+      padding: 10px 12px 12px;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* Mobile browsers need a real focused input to open the software keyboard.
+       Keep it invisible so xterm remains the only visible source of typed text. */
+    .mobile-input {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-100vw);
+    }
+
+    .mobile-type-button {
+      width: 100%;
+      min-height: 42px;
+    }
+
+    .mobile-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-areas:
+        "left up down right"
+        "escape space backspace enter";
+      gap: 8px;
+    }
+
+    .mobile-key-escape { grid-area: escape; }
+    .mobile-key-backspace { grid-area: backspace; }
+    .mobile-key-enter { grid-area: enter; }
+    .mobile-key-space { grid-area: space; }
+    .mobile-key-left { grid-area: left; }
+    .mobile-key-up { grid-area: up; }
+    .mobile-key-down { grid-area: down; }
+    .mobile-key-right { grid-area: right; }
+
+    .mobile-key {
+      min-height: 40px;
+      padding: 8px 10px;
+      background: #141414;
+      border: 1px solid #2A2A2A;
+      border-radius: 8px;
+      color: #D4D0CB;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+
+    .mobile-key:active {
+      background: #202020;
+      border-color: #FF5A2D;
+      color: #FF5A2D;
     }
 
     .terminal-wrapper {
@@ -179,6 +245,7 @@
     }
 
     .terminal-body .xterm {
+      height: 100%;
       padding: 8px;
     }
 
@@ -256,6 +323,7 @@
     /* Responsive */
     @media (pointer: coarse) {
       .mobile-note { display: block; }
+      .mobile-toolbar { display: flex; }
     }
 
     /* Short desktop viewports need to preserve terminal height over surrounding UI. */
@@ -308,6 +376,7 @@
     }
 
     @media (max-width: 600px) {
+      body { min-height: 100svh; min-height: 100dvh; height: 100dvh; overflow: hidden; }
       .header { padding: 12px 16px 0; }
       .header-top { flex-direction: column; align-items: center; text-align: center; gap: 0; margin-bottom: 0; }
       .header-logo { display: none; }
@@ -317,8 +386,14 @@
       .mobile-note { font-size: 12px; padding: 8px 12px; margin-top: 4px; }
       .pro-tip { display: none; }
       .terminal-info { display: none; }
-      .terminal-wrapper { padding: 8px 16px 8px; }
-      .terminal-footer { padding: 6px 8px; min-height: 32px; }
+      .terminal-wrapper { flex: 1; min-height: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+      .terminal-card { flex: 1; min-height: 0; max-height: none; }
+      .terminal-body { min-height: clamp(240px, 44vh, 420px); }
+      .mobile-toolbar { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
+      .mobile-type-button { min-height: 38px; }
+      .mobile-controls { gap: 6px; }
+      .mobile-key { min-height: 34px; padding: 6px 6px; font-size: 12px; }
+      .terminal-footer { padding: 4px 8px; min-height: 28px; }
       .btn-restart { padding: 4px 10px; font-size: 11px; }
       .footer-message { font-size: 11px; }
       .footer-hints { display: none; }
@@ -339,7 +414,7 @@
       <strong>Tip:</strong> Want to switch providers, add models, or set up Telegram? Just ask OpenClaw in chat — no settings menus needed.
     </div>
     <div class="mobile-note">
-      For the best experience, complete setup on a desktop browser.
+      Use the controls below to type, navigate, and select options.
     </div>
   </div>
 
@@ -358,6 +433,21 @@
       </div>
       <div class="terminal-body">
         <div id="terminal"></div>
+      </div>
+      <div class="mobile-toolbar">
+        <!-- Keyboard bridge only: typed characters are forwarded to the terminal below. -->
+        <input id="mobile-input" class="mobile-input" type="text" tabindex="-1" aria-label="Terminal input" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+        <button id="mobile-keyboard" class="mobile-key mobile-type-button" type="button">Open keyboard</button>
+        <div class="mobile-controls">
+          <button class="mobile-key mobile-key-escape" type="button" data-key="escape">Esc</button>
+          <button class="mobile-key mobile-key-backspace" type="button" data-key="backspace">⌫</button>
+          <button class="mobile-key mobile-key-enter" type="button" data-key="enter">Enter</button>
+          <button class="mobile-key mobile-key-space" type="button" data-key="space">Space</button>
+          <button class="mobile-key mobile-key-left" type="button" data-key="arrow-left">←</button>
+          <button class="mobile-key mobile-key-up" type="button" data-key="arrow-up">↑</button>
+          <button class="mobile-key mobile-key-down" type="button" data-key="arrow-down">↓</button>
+          <button class="mobile-key mobile-key-right" type="button" data-key="arrow-right">→</button>
+        </div>
       </div>
       <div class="terminal-footer">
         <span class="footer-hints">
@@ -379,6 +469,14 @@
       const footerMessage = document.getElementById('footer-message');
       const terminalElement = document.getElementById('terminal');
       const terminalBody = document.querySelector('.terminal-body');
+      const mobileInput = document.getElementById('mobile-input');
+      const mobileKeyboardButton = document.getElementById('mobile-keyboard');
+      const mobileButtons = Array.from(document.querySelectorAll('.mobile-key[data-key]'));
+      const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+      let hasFocusedOnLoad = false;
+      let hasFocusedAfterFirstOutput = false;
+      let fitTimer = null;
+      let ws;
 
       const term = new Terminal({
         cursorBlink: true,
@@ -419,15 +517,103 @@
       term.open(terminalElement);
       fitAddon.fit();
 
+      const focusDesktopTerminal = () => {
+        term.focus();
+        const helperTextarea = terminalElement.querySelector('.xterm-helper-textarea');
+        if (helperTextarea) {
+          try {
+            helperTextarea.focus({ preventScroll: true });
+          } catch (e) {
+            helperTextarea.focus();
+          }
+        }
+        setTimeout(() => {
+          term.focus();
+        }, 0);
+      };
+
+      const focusMobileInput = () => {
+        if (!mobileInput) {
+          return;
+        }
+        try {
+          mobileInput.focus({ preventScroll: true });
+        } catch (e) {
+          mobileInput.focus();
+        }
+      };
+
+      const syncTerminalSize = () => {
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      };
+
+      const scheduleTerminalFit = () => {
+        if (fitTimer) {
+          clearTimeout(fitTimer);
+        }
+        fitTimer = setTimeout(() => {
+          syncTerminalSize();
+        }, 30);
+      };
+
+      const scheduleDesktopFocus = () => {
+        if (isCoarsePointer) {
+          return;
+        }
+        focusDesktopTerminal();
+        requestAnimationFrame(() => {
+          focusDesktopTerminal();
+        });
+        setTimeout(() => {
+          focusDesktopTerminal();
+        }, 50);
+        setTimeout(() => {
+          focusDesktopTerminal();
+        }, 250);
+      };
+
       // Focus management: the terminal must have focus for arrow keys to work.
       // We aggressively grab focus because users don't know they need to click
       // the terminal, and losing focus silently breaks the interactive CLI prompts.
-      term.focus(); // Grab focus on initial load
+      if (!isCoarsePointer) {
+        scheduleDesktopFocus();
+        hasFocusedOnLoad = true;
+      }
+
+      window.addEventListener('load', () => {
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      });
 
       // Refocus on any click outside the restart button (which reloads the page)
-      document.addEventListener('click', (e) => {
-        if (!e.target.closest('.btn-restart')) {
-          term.focus();
+      document.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.btn-restart') || e.target.closest('.mobile-toolbar')) {
+          return;
+        }
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      }, true);
+
+      terminalElement.addEventListener('pointerdown', () => {
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      }, true);
+
+      window.addEventListener('focus', () => {
+        if (!isCoarsePointer) {
+          scheduleDesktopFocus();
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !isCoarsePointer) {
+          scheduleDesktopFocus();
         }
       });
 
@@ -436,9 +622,89 @@
         document.getElementById('paste-hint').textContent = '⌘V';
       }
 
+      const getArrowSequence = (direction) => {
+        const suffix = {
+          'arrow-up': 'A',
+          'arrow-down': 'B',
+          'arrow-right': 'C',
+          'arrow-left': 'D',
+        }[direction];
+        const useApplicationMode = !!(term.modes && term.modes.applicationCursorKeysMode);
+        return useApplicationMode ? `\u001bO${suffix}` : `\u001b[${suffix}`;
+      };
+
+      const controlSequences = {
+        enter: '\r',
+        escape: '\u001b',
+        space: ' ',
+        backspace: '\u007f',
+      };
+
+      const sendInput = (data) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      };
+
+      if (mobileInput) {
+        // The hidden input only exists to summon mobile keyboards. Forward each
+        // character immediately so the terminal remains the source of truth.
+        mobileInput.addEventListener('input', (event) => {
+          const value = event.target.value;
+          if (!value) {
+            return;
+          }
+          sendInput(value);
+          event.target.value = '';
+          scheduleTerminalFit();
+        });
+
+        mobileInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            sendInput('\r');
+            event.target.value = '';
+            scheduleTerminalFit();
+          } else if (event.key === 'Backspace') {
+            event.preventDefault();
+            sendInput(controlSequences.backspace);
+            event.target.value = '';
+            scheduleTerminalFit();
+          }
+        });
+      }
+
+      if (mobileKeyboardButton) {
+        const handleKeyboardPress = (event) => {
+          event.preventDefault();
+          focusMobileInput();
+        };
+
+        mobileKeyboardButton.addEventListener('click', handleKeyboardPress);
+      }
+
+      mobileButtons.forEach((button) => {
+        // Use click only for toolbar buttons; adding touch/pointer handlers too
+        // can double-send controls on mobile browsers.
+        const handleButtonPress = (event) => {
+          event.preventDefault();
+          const key = button.dataset.key;
+          const data = key.startsWith('arrow-') ? getArrowSequence(key) : controlSequences[key];
+          if (data) {
+            sendInput(data);
+          }
+          scheduleTerminalFit();
+          if (!isCoarsePointer) {
+            scheduleDesktopFocus();
+          }
+        };
+
+        button.addEventListener('click', handleButtonPress);
+      });
+
 
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(proto + '//' + location.host + '/api/terminal?token=__SETUP_TOKEN__');
+      ws = new WebSocket(proto + '//' + location.host + '/api/terminal?token=__SETUP_TOKEN__');
       let seenSecurityNotice = false;
       let setupFinished = false;
       let quietMessageShown = false;
@@ -457,7 +723,11 @@
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        term.focus(); // Refocus when CLI is ready for input
+        if (!isCoarsePointer && !hasFocusedOnLoad) {
+          scheduleDesktopFocus();
+          hasFocusedOnLoad = true;
+        }
+        scheduleTerminalFit();
       };
 
       ws.onmessage = (event) => {
@@ -465,6 +735,11 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             term.write(msg.data);
+            scheduleTerminalFit();
+            if (!isCoarsePointer && !hasFocusedAfterFirstOutput) {
+              scheduleDesktopFocus();
+              hasFocusedAfterFirstOutput = true;
+            }
             if (seenSecurityNotice || msg.data.includes('docs.openclaw.ai/security')) {
               seenSecurityNotice = true;
               scheduleWorkingNotice();
@@ -499,18 +774,32 @@
       };
 
       term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data }));
-        }
+        sendInput(data);
       });
 
       const resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        }
+        scheduleTerminalFit();
       });
+      resizeObserver.observe(document.getElementById('terminal'));
       resizeObserver.observe(terminalBody);
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+          scheduleTerminalFit();
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+          scheduleTerminalFit();
+        });
+      }
+
+      if (isCoarsePointer) {
+        requestAnimationFrame(() => {
+          scheduleTerminalFit();
+        });
+        setTimeout(() => {
+          scheduleTerminalFit();
+        }, 150);
+      }
     });
   </script>
 </body>
