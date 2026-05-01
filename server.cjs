@@ -571,7 +571,9 @@ const wss = new WebSocket.Server({ noServer: true });
 wss.on("connection", (ws) => {
   console.log("Terminal WebSocket connected");
 
-  // Only one setup session at a time — kill any existing PTY (e.g. stale tab)
+  // Only one setup session at a time — kill any existing PTY (e.g. stale tab).
+  // Each handler below keeps its own setupPty reference so a delayed close from
+  // an old browser session cannot accidentally kill the newly active session.
   if (ptyProcess) {
     try { ptyProcess.kill(); } catch (e) {}
     ptyProcess = null;
@@ -582,7 +584,7 @@ wss.on("connection", (ws) => {
   // syncs it to .env when startOpenclaw() runs after setup.
   ensureConfigDir();
   ensureShellCompletionBypass();
-  ptyProcess = pty.spawn("openclaw", [
+  const setupPty = pty.spawn("openclaw", [
     "onboard",
     "--flow", "quickstart",
     "--accept-risk",
@@ -606,9 +608,10 @@ wss.on("connection", (ws) => {
       TERM: "xterm-256color",
     },
   });
+  ptyProcess = setupPty;
 
   // PTY output -> WebSocket
-  ptyProcess.onData((data) => {
+  setupPty.onData((data) => {
     try {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "output", data }));
@@ -619,8 +622,9 @@ wss.on("connection", (ws) => {
   });
 
   // PTY exit -> notify client
-  ptyProcess.onExit(({ exitCode }) => {
+  setupPty.onExit(({ exitCode }) => {
     console.log(`openclaw onboard exited with code ${exitCode}`);
+    const wasActiveSession = ptyProcess === setupPty;
     try {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "exit", code: exitCode }));
@@ -628,9 +632,11 @@ wss.on("connection", (ws) => {
     } catch (e) {
       console.error("Error sending exit message:", e.message);
     }
-    ptyProcess = null;
+    if (wasActiveSession) {
+      ptyProcess = null;
+    }
 
-    if (exitCode === 0 && isConfigured() && !openclawProcess) {
+    if (wasActiveSession && exitCode === 0 && isConfigured() && !openclawProcess) {
       console.log("OpenClaw onboarding completed, starting gateway...");
       startOpenclaw({ repair: false });
     }
@@ -640,10 +646,13 @@ wss.on("connection", (ws) => {
   ws.on("message", (msg) => {
     try {
       const parsed = JSON.parse(msg);
-      if (parsed.type === "input" && ptyProcess) {
-        ptyProcess.write(parsed.data);
-      } else if (parsed.type === "resize" && ptyProcess) {
-        ptyProcess.resize(parsed.cols, parsed.rows);
+      if (ptyProcess !== setupPty) {
+        return;
+      }
+      if (parsed.type === "input") {
+        setupPty.write(parsed.data);
+      } else if (parsed.type === "resize") {
+        setupPty.resize(parsed.cols, parsed.rows);
       }
     } catch (e) {
       console.error("Error processing terminal input:", e.message);
@@ -652,8 +661,8 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("Terminal WebSocket closed");
-    if (ptyProcess) {
-      try { ptyProcess.kill(); } catch (e) {}
+    if (ptyProcess === setupPty) {
+      try { setupPty.kill(); } catch (e) {}
       ptyProcess = null;
     }
   });
