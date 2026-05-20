@@ -1,0 +1,17 @@
+{
+  "id": "umbrel-runtime",
+  "name": "Umbrel Runtime",
+  "description": "Injects compact Umbrel runtime context and provides Umbrel app guidance.",
+  "version": "1.0.0",
+  "activation": {
+    "onStartup": true
+  },
+  "skills": [
+    "./skills"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

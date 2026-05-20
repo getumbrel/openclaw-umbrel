@@ -16,6 +16,8 @@ const ENV_FILE = path.join(CONFIG_DIR, ".env");
 const PORT = parseInt(process.env.SETUP_PORT || "18789");
 const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
 const SKELETON_DIR = "/home-skeleton";
+const UMBREL_PLUGIN_ID = "umbrel-runtime";
+const UMBREL_PLUGIN_PATH = "/app/openclaw-context/plugins/umbrel-runtime";
 // Anti-CSWSH token for the setup terminal WebSocket. Browsers don't enforce the
 // same-origin policy on WebSocket upgrades, so without this any site could connect
 // to /api/terminal and hijack the onboarding PTY. We embed APP_SEED (per-user
@@ -175,6 +177,33 @@ function readConfig() {
   return null;
 }
 
+function ensureArrayPath(root, keys) {
+  let current = root;
+  for (const key of keys.slice(0, -1)) {
+    if (!current[key] || typeof current[key] !== "object" || Array.isArray(current[key])) {
+      current[key] = {};
+    }
+    current = current[key];
+  }
+
+  const leaf = keys[keys.length - 1];
+  if (!Array.isArray(current[leaf])) {
+    current[leaf] = [];
+  }
+  return current[leaf];
+}
+
+function removeArrayItem(items, item) {
+  let changed = false;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i] === item) {
+      items.splice(i, 1);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function getGatewayToken() {
   const env = readEnv();
   if (env.OPENCLAW_GATEWAY_TOKEN) return env.OPENCLAW_GATEWAY_TOKEN;
@@ -256,6 +285,52 @@ function reconcileConfig() {
     config.update.checkOnStart = false;
     changed = true;
     console.log("Patched config: disabled update check on start");
+  }
+
+  // Enable Umbrel-managed context through OpenClaw's supported plugin surface.
+  // The plugin also ships an `umbrel` skill, so one load path covers both the
+  // always-on runtime context and deeper on-demand guidance.
+  if (fs.existsSync(UMBREL_PLUGIN_PATH)) {
+    if (!config.plugins || typeof config.plugins !== "object" || Array.isArray(config.plugins)) {
+      config.plugins = {};
+    }
+    if (config.plugins.enabled !== true) {
+      config.plugins.enabled = true;
+      changed = true;
+      console.log("Patched config: enabled plugins");
+    }
+
+    const pluginPaths = ensureArrayPath(config, ["plugins", "load", "paths"]);
+    if (!pluginPaths.includes(UMBREL_PLUGIN_PATH)) {
+      pluginPaths.push(UMBREL_PLUGIN_PATH);
+      changed = true;
+      console.log("Patched config: added Umbrel runtime plugin path");
+    }
+
+    if (Array.isArray(config.plugins.deny) && removeArrayItem(config.plugins.deny, UMBREL_PLUGIN_ID)) {
+      changed = true;
+      console.log("Patched config: removed Umbrel runtime plugin from deny list");
+    }
+
+    const allowedPlugins = config.plugins.allow;
+    if (Array.isArray(allowedPlugins) && allowedPlugins.length > 0 && !allowedPlugins.includes(UMBREL_PLUGIN_ID)) {
+      allowedPlugins.push(UMBREL_PLUGIN_ID);
+      changed = true;
+      console.log("Patched config: added Umbrel runtime plugin to allow list");
+    }
+
+    if (!config.plugins.entries || typeof config.plugins.entries !== "object" || Array.isArray(config.plugins.entries)) {
+      config.plugins.entries = {};
+    }
+    const entry = config.plugins.entries[UMBREL_PLUGIN_ID] || {};
+    if (entry.enabled !== true) {
+      entry.enabled = true;
+      config.plugins.entries[UMBREL_PLUGIN_ID] = entry;
+      changed = true;
+      console.log("Patched config: enabled Umbrel runtime plugin");
+    }
+  } else {
+    console.warn(`Umbrel context: ${UMBREL_PLUGIN_PATH} not found; plugin config will be reconciled on next startup`);
   }
 
   // Ensure a gateway auth token exists — the onboard CLI does not generate one,

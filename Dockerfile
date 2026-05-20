@@ -45,10 +45,14 @@ RUN printf '#!/bin/bash\necho "Error: apt is not available. Please use brew inst
     && sudo ln -s /usr/local/bin/use-brew /usr/local/bin/apt \
     && sudo ln -s /usr/local/bin/use-brew /usr/local/bin/apt-get
 
-# Copy setup UI server and static files
+# Copy setup UI server, static files, and managed Umbrel context.
+# OpenClaw has passwordless sudo in this image, so root ownership is not a hard
+# read-only boundary. These files intentionally live outside /data so container
+# runtime edits are disposable and image updates overwrite the managed context.
 COPY --chown=node:node server.cjs /app/setup-server.cjs
 COPY --chown=node:node setup.html /app/setup.html
 COPY --chown=node:node logo.webp /app/logo.webp
+COPY openclaw-context /app/openclaw-context
 
 # Move home to skeleton
 RUN sudo mv /data /home-skeleton
