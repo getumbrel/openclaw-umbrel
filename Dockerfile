@@ -15,16 +15,15 @@ FROM openclaw-base
 
 USER root
 
-# Install build tools for node-pty native module, then purge to keep image slim.
-# Also install sudo (for systemctl shim) and ca-certificates/curl (for brew install).
+# Install build tools for node-pty native module, sudo for systemctl shim,
+# and ca-certificates/curl for Homebrew install.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential python3 sudo ca-certificates curl procps && \
     rm -rf /var/lib/apt/lists/*
 
 # Install setup-server dependencies (node-pty, ws).
-# Use npm install into /app/node_modules directly so npm handles version
-# resolution and conflict detection — avoids cp -rn silently dropping packages.
+# Use cp -r (not cp -rn) so version conflicts surface during build.
 WORKDIR /app/umbrel-layer
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && \
@@ -36,13 +35,19 @@ WORKDIR /app
 RUN apt-get purge -y --auto-remove build-essential python3 && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Homebrew for the node user (OpenClaw agents can brew-install packages)
+# Pre-create /home/linuxbrew directory with correct ownership so Homebrew
+# can install into it as the node user. The Umbrel compose file bind-mounts
+# a persistent volume over this directory at runtime.
+RUN mkdir -p /home/linuxbrew && \
+    chown node:node /home/linuxbrew
+
+# Install Homebrew as the node user (Homebrew refuses to run as root).
 USER node
-RUN /bin/bash -c "NONINTERACTIVE=1 $(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+RUN /bin/bash -c "NONINTERACTIVE=1 $(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 USER root
 
 # Shim systemctl for Docker — there's no systemd in the container, but OpenClaw's
-# agent calls `systemctl --user restart openclaw-gateway' to restart the gateway.
+# agent calls `systemctl --user restart openclaw-gateway` to restart the gateway.
 # This script skips flags like --user to find the subcommand (restart/stop/start),
 # then kills the gateway process by its process title ("openclaw-gateway").
 RUN printf '#!/bin/bash\ncmd=""\nfor arg in "$@"; do\n  case "$arg" in\n    -*) ;;\n    *) cmd="$arg"; break ;;\n  esac\ndone\ncase "$cmd" in\n  restart|stop) pkill -f "^openclaw-gateway([[:space:]]|$)" 2>/dev/null || true ;;\n  start) echo "openclaw-gateway is managed by the container" ;;\n  *) exit 0 ;;\nesac\n' | tee /usr/local/bin/systemctl \
@@ -60,18 +65,20 @@ COPY --chown=node:node setup.html /app/setup.html
 COPY --chown=node:node logo.webp /app/logo.webp
 COPY openclaw-context /app/openclaw-context
 
-# Create required directories with correct ownership
+# Create required directories with correct ownership.
+# /home-skeleton is the template for first-run home directory setup.
 RUN mkdir -p /data /home-skeleton && \
     chown node:node /data /home-skeleton && \
     echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Move default home to skeleton so first-run copies it for the node user
+# Move default home to skeleton so first-run copies it for the node user.
+# Use || true (not ; exit 0) so only the mv failure is suppressed.
 RUN mv /data /home-skeleton/data 2>/dev/null || true
 
 # NPM global installs go to the persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global
 
-# Setup PATH (linuxbrew installed above, no sbin dirs needed for node user)
+# Setup PATH
 ENV PATH="/data/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/bin:/bin"
 
 # Switch to non-root user
