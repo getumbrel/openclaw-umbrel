@@ -1,12 +1,15 @@
 services:
   openclaw:
-    build: .
+    build:
+      context: .
+      args:
+        OPENCLAW_VERSION: "2026.5.28"
     image: openclaw:latest
     container_name: openclaw
     restart: unless-stopped
     init: true
     environment:
-      APP_SEED: ${APP_SEED:-dev} # Provided by umbrelOS; fallback for local dev
+      APP_SEED: ${APP_SEED:-dev}
     ports:
       - "18789:18789"
     volumes:
