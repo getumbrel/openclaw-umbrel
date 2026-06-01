@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag=$(grep -oP 'OPENCLAW_VERSION=\K[0-9]+(\.[0-9]+)*' Dockerfile | head -n1)
+          tag=$(grep -oE 'OPENCLAW_VERSION=[0-9]+(\.[0-9]+)+' Dockerfile | head -n1 | cut -d= -f2)
           echo "TAG=${tag}" >> "$GITHUB_ENV"
 
       - name: Set TAG from pushed ref
@@ -56,13 +56,12 @@ jobs:
       - name: Setup Docker buildx
         run: docker buildx create --use
 
-      - name: Pull base image for cache
-        run: docker buildx imagetools inspect "ghcr.io/openclaw/openclaw:${{ env.TAG }}" || true
-
       - name: Run Docker buildx
         run: |
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --build-arg OPENCLAW_VERSION=${{ env.TAG }} \
+            --cache-from ghcr.io/${{ github.repository }}:cache-${{ env.TAG }} \
+            --cache-to type=registry,ref=ghcr.io/${{ github.repository }}:cache-${{ env.TAG }},mode=max \
             --tag ghcr.io/${{ github.repository }}:${{ env.TAG }} \
             --push .

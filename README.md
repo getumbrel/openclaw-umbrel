@@ -11,7 +11,7 @@
 The image builds on the **official OpenClaw container image** (`ghcr.io/openclaw/openclaw`) and layers Umbrel-specific components on top:
 
 1. **Base**: `ghcr.io/openclaw/openclaw:$VERSION` — the full OpenClaw gateway with all bundled extensions
-2. **Umbrel layer**: setup server (`server.cjs`), onboarding UI, `umbrel-runtime` plugin, `node-pty` for terminal access, and a `systemctl` shim
+2. **Umbrel layer**: setup server (`server.cjs`), onboarding UI, `node-pty` for terminal access, Homebrew, `systemctl` shim, and `umbrel-runtime` plugin
 
 This approach means the Umbrel image automatically inherits upstream improvements (Node.js version bumps, extension updates, security patches) by simply bumping the `OPENCLAW_VERSION` build arg.
 
@@ -27,13 +27,13 @@ This approach means the Umbrel image automatically inherits upstream improvement
 
 Three GitHub Actions workflows handle the release pipeline:
 
-1. **OpenClaw Release PR** (daily at 06:00 UTC): Checks `openclaw/openclaw` GitHub releases for the latest stable version. If a new stable release is found, creates a draft PR that bumps `OPENCLAW_VERSION` in the Dockerfile.
+1. **OpenClaw Release PR** (daily at 06:00 UTC): Checks `openclaw/openclaw` GitHub releases for the latest stable version. If a new stable release is found, creates a **draft** PR that bumps `OPENCLAW_VERSION` in the Dockerfile. Draft PRs don't trigger the review workflow — mark as ready for review when ready to publish.
 
 2. **Tag on Merge**: When an `openclaw-update` PR is merged, tags the merge commit with the new version number.
 
-3. **Docker Build and Push**: When a version tag is pushed, builds multi-arch images (amd64 + arm64) and pushes to `ghcr.io/getumbrel/openclaw-umbrel`.
+3. **Docker Build and Push**: When a version tag is pushed, builds multi-arch images (amd64 + arm64) and pushes to `ghcr.io/getumbrel/openclaw-umbrel`. Uses buildx layer caching.
 
-PRs are created as **drafts** so a human can review upstream release notes for breaking changes before publishing.
+4. **Codex PR Review**: Runs `codex exec` on PR diffs and posts reviews as comments. Supports OpenAI API (default) or local Ollama (via `workflow_dispatch` with `oss: true`).
 
 ## Local Development
 
