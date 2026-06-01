@@ -669,6 +669,7 @@ wss.on("connection", (ws) => {
     "--skip-daemon",
     "--skip-ui",
     "--skip-health",
+    "--skip-hooks",
     "--mode", "local",
     "--gateway-port", OPENCLAW_PORT.toString(),
   ], {
