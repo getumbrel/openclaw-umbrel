@@ -1,4 +1,5 @@
 name: Docker Build and Push
+
 on:
   push:
     tags:
@@ -20,14 +21,14 @@ jobs:
     steps:
       - name: Checkout (workflow_run)
         if: github.event_name == 'workflow_run'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Checkout (push tag)
         if: github.event_name == 'push'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -36,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag=$(grep -oE 'openclaw@[0-9]+(\.[0-9]+)*' Dockerfile | head -n1 | cut -d'@' -f2)
+          tag=$(grep -oE 'OPENCLAW_VERSION=[0-9]+(\.[0-9]+)+' Dockerfile | head -n1 | cut -d= -f2)
           echo "TAG=${tag}" >> "$GITHUB_ENV"
 
       - name: Set TAG from pushed ref
@@ -49,7 +50,7 @@ jobs:
       - name: Login to GitHub Container Registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
 
-      - name: Setup QEMU with credential support (fixes sudo in cross-arch builds)
+      - name: Setup QEMU with credential support
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes --credential yes
 
       - name: Setup Docker buildx
@@ -59,5 +60,8 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
+            --build-arg OPENCLAW_VERSION=${{ env.TAG }} \
+            --cache-from ghcr.io/${{ github.repository }}:cache-${{ env.TAG }} \
+            --cache-to type=registry,ref=ghcr.io/${{ github.repository }}:cache-${{ env.TAG }},mode=max \
             --tag ghcr.io/${{ github.repository }}:${{ env.TAG }} \
             --push .

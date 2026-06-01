@@ -26,9 +26,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          current_version=$(grep -oE 'openclaw@[0-9]+(\.[0-9]+)*' Dockerfile | head -n1 | cut -d'@' -f2)
-          all_versions=$(npm view openclaw versions --json)
-          latest_version=$(node -e 'const versions = JSON.parse(process.argv[1]); const list = Array.isArray(versions) ? versions : [versions]; const stable = list.filter(v => !v.includes("-")); if (!stable.length) { process.exit(1); } console.log(stable[stable.length - 1]);' "$all_versions")
+          # Read current version from Dockerfile build arg (portable grep -oE)
+          current_version=$(grep -oE 'OPENCLAW_VERSION=[0-9]+(\.[0-9]+)+' Dockerfile | head -n1 | cut -d= -f2)
+
+          # Get latest stable release from openclaw/openclaw GitHub releases
+          latest_version=$(gh release list -R openclaw/openclaw \
+            --limit 50 \
+            --json tagName,isPrerelease \
+            | jq -r '.[] | select(.isPrerelease == false) | .tagName | ltrimstr("v")' \
+            | head -n1)
+
+          # Fallback to npm if GitHub releases query failed, filtering pre-releases
+          if [ -z "$latest_version" ]; then
+            echo "No stable release found on GitHub; falling back to npm"
+            all_versions=$(npm view openclaw versions --json)
+            latest_version=$(node -e '
+              const versions = JSON.parse(process.argv[1]);
+              const list = Array.isArray(versions) ? versions : [versions];
+              const stable = list.filter(v => !v.includes("-"));
+              if (!stable.length) { process.exit(1); }
+              console.log(stable[stable.length - 1]);
+            ' "$all_versions")
+          fi
 
           echo "current_version=${current_version}" >> "$GITHUB_OUTPUT"
           echo "latest_version=${latest_version}" >> "$GITHUB_OUTPUT"
@@ -38,6 +57,8 @@ jobs:
           else
             echo "update_needed=true" >> "$GITHUB_OUTPUT"
           fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Dockerfile OpenClaw version
         if: steps.versions.outputs.update_needed == 'true'
@@ -45,11 +66,11 @@ jobs:
         run: |
           set -euo pipefail
           latest="${{ steps.versions.outputs.latest_version }}"
-          sed -i -E "s|(npm install -g openclaw@)[0-9]+(\.[0-9]+)*|\\1${latest}|" Dockerfile
+          sed -i -E "s|(OPENCLAW_VERSION=)[0-9]+(\.[0-9]+)+|\\1${latest}|" Dockerfile
 
       - name: Create or update pull request
         if: steps.versions.outputs.update_needed == 'true'
-        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: bot/openclaw-update-${{ steps.versions.outputs.latest_version }}
@@ -60,8 +81,13 @@ jobs:
             Automated update for OpenClaw.
 
             - Current version: `${{ steps.versions.outputs.current_version }}`
-            - Latest npm version: `${{ steps.versions.outputs.latest_version }}`
+            - Latest stable release: `${{ steps.versions.outputs.latest_version }}`
 
-            After this PR is merged, a separate workflow tags the merge commit with `${{ steps.versions.outputs.latest_version }}` to trigger container build.
+            The Dockerfile uses `OPENCLAW_VERSION` build arg with the official
+            `ghcr.io/openclaw/openclaw` image as base. After this PR is merged,
+            the tag workflow will trigger a container build.
+
+            ⚠️ Review the [upstream release notes](https://github.com/openclaw/openclaw/releases/tag/v${{ steps.versions.outputs.latest_version }}) for breaking changes before merging.
           labels: |
             openclaw-update
+          draft: true

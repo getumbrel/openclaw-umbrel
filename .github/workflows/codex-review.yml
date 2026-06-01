@@ -1,0 +1,92 @@
+name: Codex PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize,ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: number
+      model:
+        description: Model to use for review (e.g. gpt-5.4, glm-5.1:cloud)
+        required: false
+        default: gpt-5.4
+        type: string
+      oss:
+        description: Use local Ollama provider (--oss flag)
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    # Only run on non-draft PRs (or manual dispatch)
+    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Generate diff
+        id: diff
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}"
+          git diff "origin/${base}...HEAD" > /tmp/pr.diff
+          lines=$(wc -l < /tmp/pr.diff)
+          echo "lines=${lines}" >> "$GITHUB_OUTPUT"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Codex review (OpenAI API)
+        if: steps.diff.outputs.lines != '0' && github.event.inputs.oss != 'true'
+        id: codex-openai
+        run: |
+          set -euo pipefail
+          model="${{ github.event.inputs.model || 'gpt-5.4' }}"
+          codex exec --approval-mode never \
+            "Review this PR diff against the ${{ steps.diff.outputs.base }} branch for bugs, security issues, missing error handling, and style problems. Be concise — use bullet points. Say LGTM if fine with minor notes." \
+            < /tmp/pr.diff > /tmp/codex-review.txt 2>&1 || true
+          # Ensure output file is non-empty
+          if [ ! -s /tmp/codex-review.txt ]; then
+            echo "Codex review produced no output" > /tmp/codex-review.txt
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Run Codex review (Ollama)
+        if: steps.diff.outputs.lines != '0' && github.event.inputs.oss == 'true'
+        id: codex-ollama
+        run: |
+          set -euo pipefail
+          model="${{ github.event.inputs.model || 'glm-5.1:cloud' }}"
+          codex exec --oss --local-provider=ollama -m "${model}" --approval-mode never \
+            "Review this PR diff against the ${{ steps.diff.outputs.base }} branch for bugs, security issues, missing error handling, and style problems. Be concise — use bullet points. Say LGTM if fine with minor notes." \
+            < /tmp/pr.diff > /tmp/codex-review.txt 2>&1 || true
+          if [ ! -s /tmp/codex-review.txt ]; then
+            echo "Codex review produced no output" > /tmp/codex-review.txt
+          fi
+        env:
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'http://127.0.0.1:11434' }}
+
+      - name: Post review comment
+        if: steps.diff.outputs.lines != '0'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          body-file: /tmp/codex-review.txt
