@@ -24,6 +24,22 @@ const UMBREL_PLUGIN_PATH = "/app/openclaw-context/plugins/umbrel-runtime";
 // secret from umbrelOS) in the served HTML and require it on the WS URL — the
 // same-origin policy prevents cross-origin pages from reading it.
 const SETUP_TOKEN = process.env.APP_SEED || "";
+// OpenClaw hardcodes local-Ollama detection to http://127.0.0.1:11434 —
+// OLLAMA_HOST is ignored, and the only override (OPENCLAW_DOCKER_SETUP)
+// retargets to host.docker.internal, which umbrelOS doesn't provide. Inside
+// this container the loopback address is never reachable, so choosing Ollama
+// during onboarding dead-ends even when Umbrel's Ollama app is running.
+// startOllamaBridge() forwards that loopback address to the Ollama app's
+// container on umbrel_main_network (apps reach each other by compose container
+// name, per the Ollama app's umbrel-app.yml).
+const OLLAMA_PORT = 11434;
+const OLLAMA_CONTAINER_HOST = "ollama_ollama_1";
+// Ignored by today's CLI, but it's the standard Ollama convention and the most
+// likely shape of an upstream fix — once OpenClaw honors it, detection points
+// at the Ollama container directly and the bridge simply goes idle.
+const OLLAMA_ENV = {
+  OLLAMA_HOST: `http://${OLLAMA_CONTAINER_HOST}:${OLLAMA_PORT}`,
+};
 
 let openclawProcess = null;
 let openclawStarting = false;
@@ -364,12 +380,45 @@ function reconcileConfig() {
   }
 }
 
+// TCP bridge that makes OpenClaw's hardcoded http://127.0.0.1:11434 reach the
+// Umbrel Ollama app (see OLLAMA_CONTAINER_HOST above). With the bridge up, the
+// CLI's own Ollama detection, model listing, and runtime requests work
+// unmodified — and only when the Ollama app is actually installed, since
+// forwarded connections fail otherwise exactly like having no local Ollama.
+function startOllamaBridge() {
+  const bridge = net.createServer((client) => {
+    const upstream = net.connect(OLLAMA_PORT, OLLAMA_CONTAINER_HOST);
+    // Bound DNS+connect so a missing Ollama app fails fast instead of hanging
+    // on DNS (~5s observed). Cleared once connected — it must never fire during
+    // a quiet-but-alive request like a cold model load (30s+ with no bytes).
+    // destroy(err) (not destroy()) so the "error" handler below tears down the
+    // client too — a plain destroy() emits neither "error" nor "end", which
+    // would leave the client connection hanging open.
+    upstream.setTimeout(2000, () => upstream.destroy(new Error("connect timeout")));
+    upstream.on("connect", () => upstream.setTimeout(0));
+    client.pipe(upstream);
+    upstream.pipe(client);
+    // Ollama app not installed/running → DNS or connect error lands here.
+    // Drop the client so OpenClaw sees "no local Ollama", same as before.
+    upstream.on("error", () => client.destroy());
+    client.on("error", () => upstream.destroy());
+  });
+  // Non-fatal: without the bridge everything but local Ollama still works.
+  bridge.on("error", (err) => {
+    console.error(`Ollama bridge error (local Ollama unavailable): ${err.message}`);
+  });
+  bridge.listen(OLLAMA_PORT, "127.0.0.1", () => {
+    console.log(`Ollama bridge: 127.0.0.1:${OLLAMA_PORT} -> ${OLLAMA_CONTAINER_HOST}:${OLLAMA_PORT}`);
+  });
+  return bridge;
+}
+
 // Run before gateway start to catch migration issues or config problems that
 // readConfig()'s backup restore couldn't fix (e.g. schema changes across versions).
 async function runDoctor() {
   try {
     await execAsync("openclaw doctor --repair --yes --non-interactive", {
-      env: { ...process.env, ...readEnv() },
+      env: { ...OLLAMA_ENV, ...process.env, ...readEnv() },
     });
     console.log("openclaw doctor completed");
   } catch (e) {
@@ -396,6 +445,7 @@ function startOpenclaw({ repair = true } = {}) {
       {
         stdio: "inherit",
         env: {
+          ...OLLAMA_ENV,
           ...process.env,
           ...readEnv(),
         },
@@ -678,6 +728,7 @@ wss.on("connection", (ws) => {
     rows: 24,
     cwd: CONFIG_DIR,
     env: {
+      ...OLLAMA_ENV,
       ...process.env,
       ...readEnv(),
       SHELL: "/bin/bash",
@@ -786,6 +837,8 @@ initializeHome();
 
 ensureConfigDir();
 
+const ollamaBridge = startOllamaBridge();
+
 // Check if already configured
 if (isConfigured()) {
   console.log("OpenClaw is configured, starting gateway...");
@@ -809,5 +862,6 @@ process.on("SIGTERM", () => {
   if (openclawProcess) {
     openclawProcess.kill("SIGTERM");
   }
+  ollamaBridge.close();
   server.close();
 });
