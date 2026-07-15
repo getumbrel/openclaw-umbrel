@@ -8,11 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certifi
 
 # Set home directory
 ENV HOME=/data
+ENV OPENCLAW_STATE_DIR=/data/.openclaw \
+    NODE_COMPILE_CACHE=/data/.cache/node-compile
 WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
 
-# Install OpenClaw globally from npm
-RUN npm install -g openclaw@2026.7.1
+# Install OpenClaw globally from npm. Keep npm lifecycle-generated OpenClaw
+# state out of the runtime home so startup derives state from the installed
+# version and the user's persisted configuration.
+RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.7.1 \
+    && rm -rf /tmp/openclaw-install-state /data/.openclaw
 
 # Redirect future npm global installs to persistent volume
 ENV NPM_CONFIG_PREFIX=/data/.npm-global

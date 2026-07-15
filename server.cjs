@@ -10,7 +10,7 @@ const execAsync = promisify(exec);
 const pty = require("/app/node_modules/node-pty");
 const WebSocket = require("/app/node_modules/ws");
 
-const CONFIG_DIR = process.env.OPENCLAW_DATA_DIR || "/data/.openclaw";
+const CONFIG_DIR = process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_DATA_DIR || "/data/.openclaw";
 const CONFIG_FILE = path.join(CONFIG_DIR, "openclaw.json");
 const ENV_FILE = path.join(CONFIG_DIR, ".env");
 const PORT = parseInt(process.env.SETUP_PORT || "18789");
@@ -106,7 +106,10 @@ async function isDirEmpty(dirPath) {
   }
 }
 
-// Copy files from /home-skeleton to $HOME if they don't exist or are empty
+// Copy files from /home-skeleton to $HOME if they don't exist or are empty.
+// Never seed .openclaw from the image: npm lifecycle scripts can create a
+// build-time plugin registry there, but runtime state must be derived from the
+// installed version and the user's persisted configuration.
 async function initializeHome() {
   const homeDir = process.env.HOME;
 
@@ -114,6 +117,11 @@ async function initializeHome() {
     const entries = await fsp.readdir(SKELETON_DIR, { withFileTypes: true });
 
     for (const entry of entries) {
+      if (entry.name === ".openclaw") {
+        console.log("Skipping image-generated .openclaw state");
+        continue;
+      }
+
       const srcPath = path.join(SKELETON_DIR, entry.name);
       const destPath = path.join(homeDir, entry.name);
 
@@ -124,7 +132,14 @@ async function initializeHome() {
           console.log(
             `${entry.name} exists but is empty, copying contents inside...`
           );
-          await execAsync(`cp -r "${srcPath}/." "${destPath}/"`);
+          const children = await fsp.readdir(srcPath);
+          for (const child of children) {
+            await fsp.cp(path.join(srcPath, child), path.join(destPath, child), {
+              recursive: true,
+              force: false,
+              errorOnExist: false,
+            });
+          }
         } else {
           console.log(`Skipping ${entry.name} (already exists)`);
         }
@@ -132,7 +147,11 @@ async function initializeHome() {
         // Doesn't exist, copy it
         console.log(`Copying ${entry.name} to home...`);
         if (entry.isDirectory()) {
-          await execAsync(`cp -r "${srcPath}" "${destPath}"`);
+          await fsp.cp(srcPath, destPath, {
+            recursive: true,
+            force: false,
+            errorOnExist: false,
+          });
         } else {
           await fsp.copyFile(srcPath, destPath);
         }
@@ -781,21 +800,28 @@ server.on("upgrade", (req, socket, head) => {
   handleUpgrade(req, socket, head);
 });
 
-// Initialize home directory from skeleton
-initializeHome();
+async function main() {
+  // Finish persistent-home initialization before creating OpenClaw's state
+  // directory. This removes the former startup race that could skip skeleton
+  // content depending on filesystem timing.
+  await initializeHome();
+  ensureConfigDir();
 
-ensureConfigDir();
+  if (isConfigured()) {
+    console.log("OpenClaw is configured, starting gateway...");
+    startOpenclaw();
+  } else {
+    console.log("OpenClaw not configured, showing setup UI...");
+  }
 
-// Check if already configured
-if (isConfigured()) {
-  console.log("OpenClaw is configured, starting gateway...");
-  startOpenclaw();
-} else {
-  console.log("OpenClaw not configured, showing setup UI...");
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Setup server listening on port ${PORT}`);
+  });
 }
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Setup server listening on port ${PORT}`);
+main().catch((err) => {
+  console.error("Failed to initialize OpenClaw wrapper:", err);
+  process.exitCode = 1;
 });
 
 // Graceful shutdown: Docker sends SIGTERM on stop/restart/update.
