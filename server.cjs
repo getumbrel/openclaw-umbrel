@@ -4,9 +4,9 @@ const fs = require("fs");
 const fsp = require("fs").promises;
 const path = require("path");
 const crypto = require("crypto");
-const { spawn, exec } = require("child_process");
+const { spawn, execFile } = require("child_process");
 const { promisify } = require("util");
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const pty = require("/app/node_modules/node-pty");
 const WebSocket = require("/app/node_modules/ws");
 
@@ -18,6 +18,16 @@ const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
 const SKELETON_DIR = "/home-skeleton";
 const UMBREL_PLUGIN_ID = "umbrel-runtime";
 const UMBREL_PLUGIN_PATH = "/app/openclaw-context/plugins/umbrel-runtime";
+const GATEWAY_CONFIG_EXIT_CODE = 78;
+const GATEWAY_STABLE_RUN_MS = 60_000;
+const GATEWAY_MAX_RESTART_DELAY_MS = 30_000;
+const MAINTENANCE_TIMEOUT_MS = 5 * 60_000;
+
+// Keep OpenClaw and the wrapper on the same state root even when an older
+// deployment still supplies the wrapper-specific OPENCLAW_DATA_DIR override.
+process.env.OPENCLAW_STATE_DIR = CONFIG_DIR;
+process.env.OPENCLAW_SERVICE_REPAIR_POLICY = "external";
+process.env.OPENCLAW_NO_RESPAWN = "1";
 // Anti-CSWSH token for the setup terminal WebSocket. Browsers don't enforce the
 // same-origin policy on WebSocket upgrades, so without this any site could connect
 // to /api/terminal and hijack the onboarding PTY. We embed APP_SEED (per-user
@@ -28,6 +38,23 @@ const SETUP_TOKEN = process.env.APP_SEED || "";
 let openclawProcess = null;
 let openclawStarting = false;
 let ptyProcess = null;
+let gatewayRepairAttempted = false;
+let gatewayStartedAt = 0;
+let gatewayRestartAttempts = 0;
+let gatewayRestartTimer = null;
+let gatewayNextStartAt = 0;
+let gatewayFailure = null;
+let shuttingDown = false;
+
+function getOpenClawEnv() {
+  return {
+    ...process.env,
+    ...readEnv(),
+    OPENCLAW_STATE_DIR: CONFIG_DIR,
+    OPENCLAW_SERVICE_REPAIR_POLICY: "external",
+    OPENCLAW_NO_RESPAWN: "1",
+  };
+}
 
 function readEnv() {
   const env = {};
@@ -168,13 +195,13 @@ async function initializeHome() {
 // - On restart: the gateway tries to boot from the corrupt file and refuses to start.
 //   We have two layers of defense:
 //   1. readConfig() restores from OpenClaw's native .bak file (covers parse failures).
-//   2. runDoctor() runs `openclaw doctor --repair` before gateway start (catches
-//      migration issues or structural problems that valid JSON + .bak can't fix).
+//   2. One bounded Doctor repair runs after OpenClaw reports a startup/config
+//      failure (catches migration issues or structural problems that valid JSON
+//      + .bak can't fix without slowing every healthy start).
 // - If both .json and .bak are gone/corrupt, readConfig() returns null. isConfigured()
-//   falls through to checking .env for API keys. API keys live in a separate file
-//   (auth-profiles.json), not in openclaw.json, so they survive config corruption.
-//   If auth-profiles.json itself corrupts, the user would need to re-onboard — we
-//   intentionally don't cover that edge case to avoid coupling to OpenClaw internals.
+//   falls through to checking the durable .env for API keys. OpenClaw's other auth
+//   stores remain untouched, but without a readable config the wrapper cannot infer
+//   that onboarding completed and safely returns to setup.
 function readConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -457,64 +484,236 @@ function reconcileConfig() {
   }
 }
 
-// Run before gateway start to catch migration issues or config problems that
-// readConfig()'s backup restore couldn't fix (e.g. schema changes across versions).
+// Recovery-only repair path. OpenClaw's container gateway already runs its own
+// per-version startup migrations and plugin convergence before reporting ready,
+// so running Doctor on every ordinary restart is redundant and slow.
 async function runDoctor() {
   try {
-    await execAsync("openclaw doctor --repair --yes --non-interactive", {
-      env: { ...process.env, ...readEnv() },
+    await execFileAsync("openclaw", ["doctor", "--repair", "--yes", "--non-interactive"], {
+      env: getOpenClawEnv(),
+      timeout: MAINTENANCE_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
     });
     console.log("openclaw doctor completed");
+    return true;
   } catch (e) {
     console.error("openclaw doctor failed:", e.message);
+    return false;
   }
 }
 
-function startOpenclaw({ repair = true } = {}) {
-  // Guard against re-entry: runDoctor() is async, so without this flag every
-  // incoming request would see openclawProcess === null and spawn another doctor run.
-  if (openclawProcess || openclawStarting) {
+// Doctor can persist only its currently activated plugin subset. When recovery
+// actually invokes Doctor, rebuild the complete registry afterward so bundled
+// command/tool plugins such as browser remain available.
+async function refreshPluginRegistry() {
+  try {
+    await execFileAsync(
+      "openclaw",
+      ["plugins", "registry", "--refresh", "--json"],
+      {
+        env: getOpenClawEnv(),
+        timeout: MAINTENANCE_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024,
+      }
+    );
+    console.log("OpenClaw plugin registry refreshed");
+    return true;
+  } catch (e) {
+    console.error("OpenClaw plugin registry refresh failed:", e.message);
+    return false;
+  }
+}
+
+async function prepareOpenclaw({ repair }) {
+  reconcileConfig();
+  if (!repair) return;
+
+  console.log("Running one automatic OpenClaw startup repair...");
+  await runDoctor();
+  // Doctor may migrate or rewrite configuration, so re-assert the small set
+  // of settings owned by the Umbrel wrapper before rebuilding the registry.
+  reconcileConfig();
+  await refreshPluginRegistry();
+}
+
+function getConfigFingerprint() {
+  try {
+    return crypto.createHash("sha256").update(fs.readFileSync(CONFIG_FILE)).digest("hex");
+  } catch {
+    return "missing";
+  }
+}
+
+function clearResolvedConfigFailure() {
+  if (
+    gatewayFailure?.code === GATEWAY_CONFIG_EXIT_CODE &&
+    gatewayFailure.repairing !== true &&
+    gatewayFailure.configFingerprint !== getConfigFingerprint()
+  ) {
+    console.log("OpenClaw config changed; clearing exit-78 restart block");
+    gatewayFailure = null;
+    gatewayRepairAttempted = false;
+    gatewayRestartAttempts = 0;
+    gatewayNextStartAt = 0;
+  }
+}
+
+function computeRestartDelay() {
+  const exponent = Math.max(0, gatewayRestartAttempts - 1);
+  return Math.min(2_000 * (2 ** exponent), GATEWAY_MAX_RESTART_DELAY_MS);
+}
+
+function scheduleGatewayRestart(delayMs) {
+  if (shuttingDown || gatewayRestartTimer || gatewayFailure?.code === GATEWAY_CONFIG_EXIT_CODE) {
     return;
+  }
+  gatewayNextStartAt = Date.now() + delayMs;
+  console.log(`Scheduling OpenClaw gateway restart in ${delayMs}ms`);
+  gatewayRestartTimer = setTimeout(() => {
+    gatewayRestartTimer = null;
+    gatewayNextStartAt = 0;
+    startOpenclaw();
+  }, delayMs);
+}
+
+function recordGatewayExit(code, signal) {
+  const runDuration = gatewayStartedAt ? Date.now() - gatewayStartedAt : 0;
+  gatewayStartedAt = 0;
+
+  if (shuttingDown) return;
+
+  // OpenClaw uses exit 78 for invalid config, but its startup migration guard
+  // currently reports some repairable convergence failures as an early exit 1.
+  // Repair either case once per wrapper lifetime; healthy boots pay no cost.
+  const repairableStartupFailure =
+    code === GATEWAY_CONFIG_EXIT_CODE ||
+    (code === 1 && runDuration < GATEWAY_STABLE_RUN_MS);
+  if (repairableStartupFailure && !gatewayRepairAttempted) {
+    gatewayRepairAttempted = true;
+    gatewayFailure = {
+      code,
+      signal,
+      repairing: true,
+      configFingerprint: getConfigFingerprint(),
+      at: Date.now(),
+    };
+    gatewayNextStartAt = Number.POSITIVE_INFINITY;
+    openclawStarting = true;
+    console.error(
+      `OpenClaw stopped with exit ${code} during startup; attempting one automatic repair`
+    );
+    prepareOpenclaw({ repair: true })
+      .catch((err) => {
+        console.error("OpenClaw automatic repair failed:", err.message);
+      })
+      .finally(() => {
+        openclawStarting = false;
+        if (shuttingDown) return;
+        gatewayFailure = null;
+        gatewayNextStartAt = 0;
+        console.log("Retrying OpenClaw gateway after automatic repair...");
+        startOpenclaw();
+      });
+    return;
+  }
+
+  if (code === GATEWAY_CONFIG_EXIT_CODE) {
+    gatewayFailure = {
+      code,
+      signal,
+      configFingerprint: getConfigFingerprint(),
+      at: Date.now(),
+    };
+    gatewayNextStartAt = Number.POSITIVE_INFINITY;
+    console.error(
+      "OpenClaw stopped with exit 78; automatic restarts are blocked until the config changes or the app restarts"
+    );
+    return;
+  }
+
+  const failedBySignal = Boolean(
+    signal && !["SIGINT", "SIGTERM"].includes(signal)
+  );
+  if ((code !== null && code !== 0) || failedBySignal) {
+    gatewayRestartAttempts = runDuration >= GATEWAY_STABLE_RUN_MS
+      ? 1
+      : gatewayRestartAttempts + 1;
+    gatewayFailure = { code, signal, at: Date.now() };
+    scheduleGatewayRestart(computeRestartDelay());
+    return;
+  }
+
+  // Clean exits and signal-driven restarts (including the systemctl shim) are
+  // intentional. Relaunch promptly so channel delivery does not depend on an
+  // open dashboard tab making the next HTTP request.
+  gatewayRestartAttempts = 0;
+  gatewayFailure = null;
+  scheduleGatewayRestart(250);
+}
+
+function spawnGateway() {
+  openclawStarting = false;
+  gatewayNextStartAt = 0;
+  gatewayFailure = null;
+  console.log("Starting OpenClaw gateway...");
+  const child = spawn(
+    "openclaw",
+    ["gateway", "--port", OPENCLAW_PORT.toString()],
+    {
+      stdio: "inherit",
+      env: getOpenClawEnv(),
+    }
+  );
+  openclawProcess = child;
+
+  child.once("spawn", () => {
+    gatewayStartedAt = Date.now();
+  });
+
+  child.once("error", (err) => {
+    if (openclawProcess !== child) return;
+    console.error("Failed to start OpenClaw gateway:", err.message);
+    openclawProcess = null;
+    openclawStarting = false;
+    gatewayRestartAttempts += 1;
+    gatewayFailure = { code: null, signal: null, at: Date.now(), message: err.message };
+    scheduleGatewayRestart(computeRestartDelay());
+  });
+
+  child.once("exit", (code, signal) => {
+    if (openclawProcess !== child) return;
+    console.log(`OpenClaw exited with code ${code}${signal ? ` (${signal})` : ""}`);
+    openclawProcess = null;
+    openclawStarting = false;
+    recordGatewayExit(code, signal);
+  });
+}
+
+function startOpenclaw() {
+  clearResolvedConfigFailure();
+
+  // Guard against async reconciliation/recovery and duplicate request/restart triggers.
+  if (
+    shuttingDown ||
+    openclawProcess ||
+    openclawStarting ||
+    gatewayFailure?.code === GATEWAY_CONFIG_EXIT_CODE ||
+    Date.now() < gatewayNextStartAt
+  ) {
+    return false;
   }
 
   openclawStarting = true;
-  reconcileConfig();
-
-  const spawnGateway = () => {
-    openclawStarting = false;
-    console.log("Starting OpenClaw gateway...");
-    openclawProcess = spawn(
-      "openclaw",
-      ["gateway", "--port", OPENCLAW_PORT.toString()],
-      {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          ...readEnv(),
-        },
-      }
-    );
-
-    openclawProcess.on("exit", (code) => {
-      console.log(`OpenClaw exited with code ${code}`);
-      openclawProcess = null;
+  prepareOpenclaw({ repair: false })
+    .then(spawnGateway)
+    .catch((err) => {
+      openclawStarting = false;
+      console.error("OpenClaw startup preparation failed:", err.message);
+      gatewayRestartAttempts += 1;
+      gatewayFailure = { code: null, signal: null, at: Date.now(), message: err.message };
+      scheduleGatewayRestart(computeRestartDelay());
     });
-  };
-
-  if (!repair) {
-    // Fresh onboarding just wrote this config, so avoid a full repair/migration
-    // pass before the first gateway start. We still run doctor on normal
-    // already-configured container starts where upgrade or stale-state repairs
-    // are plausible.
-    console.log("Skipping openclaw doctor after fresh onboarding");
-    spawnGateway();
-    return;
-  }
-
-  // .finally() ensures the gateway starts even if doctor fails or rejects —
-  // a degraded gateway is better than no gateway.
-  console.log("Running openclaw doctor before gateway start...");
-  runDoctor().finally(spawnGateway);
+  return true;
 }
 
 // Read static files at startup
@@ -563,8 +762,37 @@ p{margin:0;color:#A89F99;font-size:15px;line-height:1.6}
 </body>
 </html>`;
 
+const CONFIG_ERROR_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#0D0D0D">
+<title>OpenClaw needs attention</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0D0D0D;color:#F0EDE8}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
+.card{width:min(100%,520px);background:#141414;border:1px solid #2A2A2A;border-radius:18px;padding:28px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+h1{margin:0 0 12px;font-size:26px}p{margin:0;color:#B5AEA9;line-height:1.6}.hint{margin-top:18px;padding:12px 14px;background:#1A1A1A;border-left:3px solid #FF5A2D;border-radius:6px;color:#D4D0CB}
+</style>
+</head>
+<body><div class="card"><h1>OpenClaw needs attention</h1><p>The Gateway stopped because its configuration could not be loaded safely. Automatic restarts are paused to prevent a crash loop.</p><div class="hint">Restart the app to retry Umbrel’s automatic repair, or repair the OpenClaw configuration in the app data directory.</div></div></body>
+</html>`;
+
 function getTokenFingerprint(token) {
   return crypto.createHash("sha256").update(token).digest("base64url").slice(0, 24);
+}
+
+function renderGatewayUnavailable(res) {
+  const configBlocked =
+    gatewayFailure?.code === GATEWAY_CONFIG_EXIT_CODE &&
+    gatewayFailure.repairing !== true;
+  res.writeHead(configBlocked ? 503 : 200, {
+    "Content-Type": "text/html",
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+  });
+  res.end(configBlocked ? CONFIG_ERROR_HTML : LOADING_HTML);
 }
 
 function proxyToOpenclaw(req, res) {
@@ -624,9 +852,7 @@ function proxyToOpenclaw(req, res) {
   });
 
   proxy.on("error", () => {
-    // OpenClaw not ready yet, show loading page
-    res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-store" });
-    res.end(LOADING_HTML);
+    renderGatewayUnavailable(res);
   });
 
   req.pipe(proxy);
@@ -816,7 +1042,7 @@ wss.on("connection", (ws) => {
 
     if (wasActiveSession && exitCode === 0 && isConfigured() && !openclawProcess) {
       console.log("OpenClaw onboarding completed, starting gateway...");
-      startOpenclaw({ repair: false });
+      startOpenclaw();
     }
   });
 
@@ -912,6 +1138,11 @@ main().catch((err) => {
 // mid-write and corrupt config or state files.
 process.on("SIGTERM", () => {
   console.log("Received SIGTERM, shutting down...");
+  shuttingDown = true;
+  if (gatewayRestartTimer) {
+    clearTimeout(gatewayRestartTimer);
+    gatewayRestartTimer = null;
+  }
   if (ptyProcess) {
     try { ptyProcess.kill(); } catch (e) {}
   }

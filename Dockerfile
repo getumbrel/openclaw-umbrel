@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certifi
 # Set home directory
 ENV HOME=/data
 ENV OPENCLAW_STATE_DIR=/data/.openclaw \
+    OPENCLAW_SERVICE_REPAIR_POLICY=external \
+    OPENCLAW_NO_RESPAWN=1 \
     NODE_COMPILE_CACHE=/data/.cache/node-compile
 WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
@@ -35,13 +37,14 @@ RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/instal
 
 # Shim systemctl for Docker — there's no systemd in the container, but OpenClaw's
 # agent calls `systemctl --user restart openclaw-gateway` to restart the gateway.
-# This script skips flags like --user to find the subcommand (restart/stop/start),
-# then kills the gateway process by its process title ("openclaw-gateway").
-# The container's `restart: unless-stopped` policy brings everything back.
+# This script skips flags like --user to find the subcommand. Restart kills the
+# gateway by its process title ("openclaw-gateway"), while start/stop acknowledge
+# that lifecycle is container-owned. The wrapper observes restart and relaunches
+# the Gateway with bounded backoff.
 # `|| true` prevents pkill's non-zero exit code from making the restart look like
 # a failure to the agent. Anchor the pkill match so it only catches the gateway
 # process, not this shim's own argv (`systemctl ... openclaw-gateway.service`).
-RUN printf '#!/bin/bash\n# Skip flags (e.g. --user) to find the actual subcommand\ncmd=""\nfor arg in "$@"; do\n  case "$arg" in\n    -*) ;;\n    *) cmd="$arg"; break ;;\n  esac\ndone\ncase "$cmd" in\n  restart|stop) pkill -f "^openclaw-gateway([[:space:]]|$)" 2>/dev/null || true ;;\n  start) echo "openclaw-gateway is managed by the container" ;;\n  *) exit 0 ;;\nesac\n' | sudo tee /usr/local/bin/systemctl \
+RUN printf '#!/bin/bash\n# Skip flags (e.g. --user) to find the actual subcommand\ncmd=""\nfor arg in "$@"; do\n  case "$arg" in\n    -*) ;;\n    *) cmd="$arg"; break ;;\n  esac\ndone\ncase "$cmd" in\n  restart) pkill -f "^openclaw-gateway([[:space:]]|$)" 2>/dev/null || true ;;\n  start|stop) echo "openclaw-gateway lifecycle is managed by the container" ;;\n  *) exit 0 ;;\nesac\n' | sudo tee /usr/local/bin/systemctl \
     && sudo chmod +x /usr/local/bin/systemctl
 
 # Replace apt/apt-get with script telling openclaw to use brew
