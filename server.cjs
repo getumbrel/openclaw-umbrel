@@ -223,15 +223,35 @@ function removeArrayItem(items, item) {
   return changed;
 }
 
+function resolveGatewayTokenValue(value, env = readEnv()) {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  // OpenClaw's supported onboarding SecretRef form. Resolving the common env
+  // source here lets the wrapper and Gateway use the same token without a CLI
+  // subprocess on every proxied request.
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    value.source === "env" &&
+    typeof value.id === "string" &&
+    value.id.length > 0
+  ) {
+    return env[value.id] || process.env[value.id] || null;
+  }
+
+  return null;
+}
+
 function getGatewayToken() {
   const env = readEnv();
-  if (env.OPENCLAW_GATEWAY_TOKEN) return env.OPENCLAW_GATEWAY_TOKEN;
-  if (process.env.OPENCLAW_GATEWAY_TOKEN) return process.env.OPENCLAW_GATEWAY_TOKEN;
   const config = readConfig();
-  if (config && config.gateway && config.gateway.auth && config.gateway.auth.token) {
-    return config.gateway.auth.token;
+  if (config?.gateway?.auth && "token" in config.gateway.auth) {
+    return resolveGatewayTokenValue(config.gateway.auth.token, env);
   }
-  return null;
+  return env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || null;
 }
 
 function isConfigured() {
@@ -282,8 +302,29 @@ function reconcileConfig() {
 
   let changed = false;
 
-  // Ensure allowInsecureAuth is set (needed for Umbrel's auth proxy)
+  // Umbrel owns the gateway lifecycle and only proxies to the loopback listener.
+  // Keep these explicit so upgrades or repaired configs cannot flip into a
+  // gateway mode/bind that the wrapper does not manage.
   if (!config.gateway) config.gateway = {};
+  if (config.gateway.mode !== "local") {
+    config.gateway.mode = "local";
+    changed = true;
+    console.log("Patched config: set gateway mode to local");
+  }
+  if (config.gateway.bind !== "loopback") {
+    config.gateway.bind = "loopback";
+    changed = true;
+    console.log("Patched config: set gateway bind to loopback");
+  }
+  if (config.gateway.port !== OPENCLAW_PORT) {
+    config.gateway.port = OPENCLAW_PORT;
+    changed = true;
+    console.log(`Patched config: set gateway port to ${OPENCLAW_PORT}`);
+  }
+
+  // The browser can reach Umbrel over plain HTTP, but the Gateway only sees this
+  // wrapper's authenticated loopback connection. OpenClaw explicitly permits
+  // token-only local Control UI connections when allowInsecureAuth is enabled.
   if (!config.gateway.controlUi) config.gateway.controlUi = {};
   if (!config.gateway.controlUi.allowInsecureAuth) {
     config.gateway.controlUi.allowInsecureAuth = true;
@@ -291,11 +332,26 @@ function reconcileConfig() {
     console.log("Patched config: enabled allowInsecureAuth");
   }
 
-  // Disable device auth (would break access via umbrel.local)
-  if (!config.gateway.controlUi.dangerouslyDisableDeviceAuth) {
-    config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+  // Do not keep OpenClaw's global break-glass device-auth bypass enabled. The
+  // narrower local token-auth compatibility path above is sufficient because
+  // the Gateway binds to loopback and is reachable only through this wrapper.
+  if ("dangerouslyDisableDeviceAuth" in config.gateway.controlUi) {
+    delete config.gateway.controlUi.dangerouslyDisableDeviceAuth;
     changed = true;
-    console.log("Patched config: disabled device auth");
+    console.log("Patched config: removed dangerous device auth bypass");
+  }
+
+  // Chromium's namespace sandbox is unavailable in the Umbrel container. The
+  // browser still runs as the image's unprivileged `node` user and remains
+  // inside the app container, but OpenClaw must pass --no-sandbox for it to
+  // start reliably on Docker hosts.
+  if (!config.browser || typeof config.browser !== "object" || Array.isArray(config.browser)) {
+    config.browser = {};
+  }
+  if (config.browser.noSandbox !== true) {
+    config.browser.noSandbox = true;
+    changed = true;
+    console.log("Patched config: enabled container-compatible browser mode");
   }
 
   // Disable update checks (updates are managed by Umbrel via Docker image bumps)
@@ -352,11 +408,25 @@ function reconcileConfig() {
     console.warn(`Umbrel context: ${UMBREL_PLUGIN_PATH} not found; plugin config will be reconciled on next startup`);
   }
 
-  // Ensure a gateway auth token exists — the onboard CLI does not generate one,
-  // so without this the Control UI WebSocket fails with "token_missing".
+  // Ensure the wrapper can resolve the gateway auth token. Preserve OpenClaw's
+  // supported env SecretRef form; replace other unresolved token shapes with a
+  // wrapper-managed token instead of accidentally serializing "[object Object]".
   if (!config.gateway.auth) config.gateway.auth = {};
-  if (!config.gateway.auth.token) {
+  const env = readEnv();
+  let usesAlternateTokenEnv =
+    config.gateway.auth.token &&
+    typeof config.gateway.auth.token === "object" &&
+    !Array.isArray(config.gateway.auth.token) &&
+    config.gateway.auth.token.source === "env" &&
+    config.gateway.auth.token.id !== "OPENCLAW_GATEWAY_TOKEN";
+  let token = resolveGatewayTokenValue(config.gateway.auth.token, env);
+  if (!token) {
+    if (config.gateway.auth.token) {
+      console.warn("Replacing unresolved gateway token reference with an Umbrel-managed token");
+    }
     config.gateway.auth.token = crypto.randomBytes(24).toString("hex");
+    token = config.gateway.auth.token;
+    usesAlternateTokenEnv = false;
     changed = true;
     console.log("Patched config: generated gateway auth token");
   }
@@ -373,10 +443,14 @@ function reconcileConfig() {
     writeConfig(config);
   }
 
-  // Sync gateway token to .env so the proxy always has it
-  const token = config.gateway.auth.token;
-  const env = readEnv();
-  if (env.OPENCLAW_GATEWAY_TOKEN !== token) {
+  // Plaintext and OPENCLAW_GATEWAY_TOKEN-backed configs use the conventional
+  // mirror. A SecretRef pointing at another env variable must not be shadowed
+  // by a stale OPENCLAW_GATEWAY_TOKEN, which OpenClaw treats as an override.
+  if (usesAlternateTokenEnv && "OPENCLAW_GATEWAY_TOKEN" in env) {
+    delete env.OPENCLAW_GATEWAY_TOKEN;
+    writeEnv(env);
+    console.log("Removed stale gateway token override for env SecretRef");
+  } else if (!usesAlternateTokenEnv && env.OPENCLAW_GATEWAY_TOKEN !== token) {
     env.OPENCLAW_GATEWAY_TOKEN = token;
     writeEnv(env);
     console.log("Synced gateway token to .env");
@@ -674,12 +748,13 @@ wss.on("connection", (ws) => {
   }
 
   // Spawn openclaw onboard with flags that skip everything except provider/API key selection.
-  // The CLI does NOT generate a gateway token — reconcileConfig() generates one and
-  // syncs it to .env when startOpenclaw() runs after setup.
+  // reconcileConfig() normalizes the internal gateway port and auth afterward;
+  // this also covers interactive OpenClaw versions that ignore --gateway-port.
   ensureConfigDir();
   ensureShellCompletionBypass();
   const setupPty = pty.spawn("openclaw", [
     "onboard",
+    "--classic",
     "--flow", "quickstart",
     "--accept-risk",
     "--skip-channels",
@@ -689,8 +764,10 @@ wss.on("connection", (ws) => {
     "--skip-ui",
     "--skip-health",
     "--skip-hooks",
+    "--skip-bootstrap",
     "--mode", "local",
     "--gateway-port", OPENCLAW_PORT.toString(),
+    "--gateway-bind", "loopback",
   ], {
     name: "xterm-256color",
     cols: 80,
