@@ -1,7 +1,7 @@
 # OpenClaw Docker Image for Umbrel
 # Self-hosted personal AI assistant with web-based setup
 
-FROM node:22-trixie-slim
+FROM node:22.23.1-trixie-slim
 
 # Install global deps
 RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential python3 procps file chromium && rm -rf /var/lib/apt/lists/*
