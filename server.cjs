@@ -520,9 +520,8 @@ function startOpenclaw({ repair = true } = {}) {
 // Read static files at startup
 const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
 const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
-// Loading page shown while the gateway is starting up. Keep the refresh in JS:
-// Chrome skips meta-refresh when the URL contains a hash fragment, and our
-// token redirect lands at /?token=...#token=....
+// Loading page shown while the gateway is starting up. Keep the refresh in JS
+// because the authentication redirect includes a hash fragment.
 const LOADING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -564,22 +563,25 @@ p{margin:0;color:#A89F99;font-size:15px;line-height:1.6}
 </body>
 </html>`;
 
+function getTokenFingerprint(token) {
+  return crypto.createHash("sha256").update(token).digest("base64url").slice(0, 24);
+}
+
 function proxyToOpenclaw(req, res) {
   const token = getGatewayToken();
 
-  // Redirect root to a tokenized URL so the Control UI can authenticate.
-  // The token goes in two places:
-  //   ?token=… — prevents a redirect loop (server checks searchParams)
-  //   #token=… — delivers the token to the Control UI JS, which reads auth
-  //              exclusively from the hash fragment, not query params
+  // Deliver the secret only in the URL fragment, which is never sent in HTTP
+  // requests or proxy access logs. A one-way, non-secret fingerprint in the
+  // query prevents redirect loops and lets us refresh stale browser tokens.
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (token && url.pathname === "/" && url.searchParams.get("token") !== token) {
-    // If setup generated or repaired a token while the browser still has an
-    // older dashboard URL, force the URL hash back in sync. The Control UI reads
-    // auth from the hash, so a stale token there causes WebSocket auth failures
-    // even though the proxy injects the current Bearer token.
+  const tokenFingerprint = token ? getTokenFingerprint(token) : null;
+  if (token && url.pathname === "/" && url.searchParams.get("auth") !== tokenFingerprint) {
     const encodedToken = encodeURIComponent(token);
-    res.writeHead(302, { Location: `/?token=${encodedToken}#token=${encodedToken}` });
+    res.writeHead(302, {
+      Location: `/?auth=${tokenFingerprint}#token=${encodedToken}`,
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+    });
     res.end();
     return;
   }
@@ -595,7 +597,9 @@ function proxyToOpenclaw(req, res) {
   const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
   const headers = { ...req.headers };
   headers["host"] = gatewayHost;
-  headers["origin"] = `http://${gatewayHost}`;
+  if (headers["origin"]) {
+    headers["origin"] = `http://${gatewayHost}`;
+  }
   delete headers["x-forwarded-for"];
   delete headers["x-forwarded-proto"];
   delete headers["x-forwarded-host"];
@@ -641,7 +645,9 @@ function handleUpgrade(req, socket, head) {
     const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
     const headers = { ...req.headers };
     headers["host"] = gatewayHost;
-    headers["origin"] = `http://${gatewayHost}`;
+    if (headers["origin"]) {
+      headers["origin"] = `http://${gatewayHost}`;
+    }
     delete headers["x-forwarded-for"];
     delete headers["x-forwarded-proto"];
     delete headers["x-forwarded-host"];
