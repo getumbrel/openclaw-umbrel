@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag=$(grep -oE 'openclaw@[0-9]+(\.[0-9]+)*' Dockerfile | head -n1 | cut -d'@' -f2)
+          tag=$(node -e 'const fs = require("fs"); const match = fs.readFileSync("Dockerfile", "utf8").match(/npm install -g openclaw@([^\s\\]+)/); if (!match) process.exit(1); process.stdout.write(match[1]);')
           echo "TAG=${tag}" >> "$GITHUB_ENV"
 
       - name: Set TAG from pushed ref
