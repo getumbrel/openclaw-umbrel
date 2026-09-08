@@ -2,6 +2,10 @@
   "name": "openclaw-umbrel",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "test:integration": "node test/gateway-compatibility.cjs"
+  },
   "dependencies": {
     "node-pty": "^1.0.0",
     "ws": "8.21.0"

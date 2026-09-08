@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certifi
 ENV HOME=/data
 ENV OPENCLAW_STATE_DIR=/data/.openclaw \
     OPENCLAW_SERVICE_REPAIR_POLICY=external \
+    OPENCLAW_SUPERVISOR_MODE=external \
     OPENCLAW_NO_RESPAWN=1 \
     NODE_COMPILE_CACHE=/data/.cache/node-compile
 WORKDIR /data

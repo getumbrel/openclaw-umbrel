@@ -7,14 +7,18 @@ const crypto = require("crypto");
 const { spawn, execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const pty = require("/app/node_modules/node-pty");
-const WebSocket = require("/app/node_modules/ws");
+const pty = require("node-pty");
+const WebSocket = require("ws");
 
 const CONFIG_DIR = process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_DATA_DIR || "/data/.openclaw";
 const CONFIG_FILE = path.join(CONFIG_DIR, "openclaw.json");
 const ENV_FILE = path.join(CONFIG_DIR, ".env");
 const PORT = parseInt(process.env.SETUP_PORT || "18789");
 const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
+const GATEWAY_HOST = `127.0.0.1:${OPENCLAW_PORT}`;
+const GATEWAY_ORIGIN = `http://${GATEWAY_HOST}`;
+const UMBREL_OWNER = "umbrel-owner";
+const UMBREL_USER_HEADER = "x-umbrel-user";
 const SKELETON_DIR = "/home-skeleton";
 const UMBREL_PLUGIN_ID = "umbrel-runtime";
 const UMBREL_PLUGIN_PATH = "/app/openclaw-context/plugins/umbrel-runtime";
@@ -27,6 +31,7 @@ const MAINTENANCE_TIMEOUT_MS = 5 * 60_000;
 // deployment still supplies the wrapper-specific OPENCLAW_DATA_DIR override.
 process.env.OPENCLAW_STATE_DIR = CONFIG_DIR;
 process.env.OPENCLAW_SERVICE_REPAIR_POLICY = "external";
+process.env.OPENCLAW_SUPERVISOR_MODE = "external";
 process.env.OPENCLAW_NO_RESPAWN = "1";
 // Anti-CSWSH token for the setup terminal WebSocket. Browsers don't enforce the
 // same-origin policy on WebSocket upgrades, so without this any site could connect
@@ -47,13 +52,19 @@ let gatewayFailure = null;
 let shuttingDown = false;
 
 function getOpenClawEnv() {
-  return {
+  const env = {
     ...process.env,
     ...readEnv(),
     OPENCLAW_STATE_DIR: CONFIG_DIR,
     OPENCLAW_SERVICE_REPAIR_POLICY: "external",
+    OPENCLAW_SUPERVISOR_MODE: "external",
     OPENCLAW_NO_RESPAWN: "1",
   };
+  // Trusted-proxy mode rejects a shared token, including inherited overrides.
+  delete env.OPENCLAW_GATEWAY_TOKEN;
+  const password = resolveGatewaySecretValue(readConfig()?.gateway?.auth?.password, env);
+  if (password) env.OPENCLAW_GATEWAY_PASSWORD = password;
+  return env;
 }
 
 function readEnv() {
@@ -250,14 +261,13 @@ function removeArrayItem(items, item) {
   return changed;
 }
 
-function resolveGatewayTokenValue(value, env = readEnv()) {
+function resolveGatewaySecretValue(value, env = readEnv()) {
   if (typeof value === "string" && value.length > 0) {
     return value;
   }
 
   // OpenClaw's supported onboarding SecretRef form. Resolving the common env
-  // source here lets the wrapper and Gateway use the same token without a CLI
-  // subprocess on every proxied request.
+  // source here keeps internal CLI clients on the Gateway's password.
   if (
     value &&
     typeof value === "object" &&
@@ -270,15 +280,6 @@ function resolveGatewayTokenValue(value, env = readEnv()) {
   }
 
   return null;
-}
-
-function getGatewayToken() {
-  const env = readEnv();
-  const config = readConfig();
-  if (config?.gateway?.auth && "token" in config.gateway.auth) {
-    return resolveGatewayTokenValue(config.gateway.auth.token, env);
-  }
-  return env.OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || null;
 }
 
 function isConfigured() {
@@ -349,23 +350,20 @@ function reconcileConfig() {
     console.log(`Patched config: set gateway port to ${OPENCLAW_PORT}`);
   }
 
-  // The browser can reach Umbrel over plain HTTP, but the Gateway only sees this
-  // wrapper's authenticated loopback connection. OpenClaw explicitly permits
-  // token-only local Control UI connections when allowInsecureAuth is enabled.
+  // Umbrel authenticates the browser before it reaches this wrapper. Current
+  // OpenClaw uses trusted-proxy identity for HTTP browsers without device keys.
   if (!config.gateway.controlUi) config.gateway.controlUi = {};
-  if (!config.gateway.controlUi.allowInsecureAuth) {
-    config.gateway.controlUi.allowInsecureAuth = true;
-    changed = true;
-    console.log("Patched config: enabled allowInsecureAuth");
+  for (const key of ["allowInsecureAuth", "dangerouslyDisableDeviceAuth"]) {
+    if (key in config.gateway.controlUi) {
+      delete config.gateway.controlUi[key];
+      changed = true;
+      console.log(`Patched config: removed retired ${key}`);
+    }
   }
-
-  // Do not keep OpenClaw's global break-glass device-auth bypass enabled. The
-  // narrower local token-auth compatibility path above is sufficient because
-  // the Gateway binds to loopback and is reachable only through this wrapper.
-  if ("dangerouslyDisableDeviceAuth" in config.gateway.controlUi) {
-    delete config.gateway.controlUi.dangerouslyDisableDeviceAuth;
+  const allowedOrigins = ensureArrayPath(config, ["gateway", "controlUi", "allowedOrigins"]);
+  if (!allowedOrigins.includes(GATEWAY_ORIGIN)) {
+    allowedOrigins.push(GATEWAY_ORIGIN);
     changed = true;
-    console.log("Patched config: removed dangerous device auth bypass");
   }
 
   // Chromium's namespace sandbox is unavailable in the Umbrel container. The
@@ -431,56 +429,80 @@ function reconcileConfig() {
       changed = true;
       console.log("Patched config: enabled Umbrel runtime plugin");
     }
+    if (entry.hooks?.allowConversationAccess !== true) {
+      entry.hooks = { ...entry.hooks, allowConversationAccess: true };
+      config.plugins.entries[UMBREL_PLUGIN_ID] = entry;
+      changed = true;
+      console.log("Patched config: allowed Umbrel runtime prompt hook");
+    }
   } else {
     console.warn(`Umbrel context: ${UMBREL_PLUGIN_PATH} not found; plugin config will be reconciled on next startup`);
   }
 
-  // Ensure the wrapper can resolve the gateway auth token. Preserve OpenClaw's
-  // supported env SecretRef form; replace other unresolved token shapes with a
-  // wrapper-managed token instead of accidentally serializing "[object Object]".
+  // The Gateway trusts only loopback ingress for the Umbrel owner. Device enrollment
+  // grants ordinary UI scopes; admin access belongs to the verified proxy
+  // identity on each connection, not to a durable unrestricted device token.
   if (!config.gateway.auth) config.gateway.auth = {};
-  const env = readEnv();
-  let usesAlternateTokenEnv =
-    config.gateway.auth.token &&
-    typeof config.gateway.auth.token === "object" &&
-    !Array.isArray(config.gateway.auth.token) &&
-    config.gateway.auth.token.source === "env" &&
-    config.gateway.auth.token.id !== "OPENCLAW_GATEWAY_TOKEN";
-  let token = resolveGatewayTokenValue(config.gateway.auth.token, env);
-  if (!token) {
-    if (config.gateway.auth.token) {
-      console.warn("Replacing unresolved gateway token reference with an Umbrel-managed token");
+  const trustedProxy = {
+    userHeader: UMBREL_USER_HEADER,
+    allowUsers: [UMBREL_OWNER],
+    allowLoopback: true,
+    requiredHeaders: ["x-forwarded-for"],
+    deviceAutoApprove: {
+      enabled: true,
+      scopes: ["operator.read", "operator.write", "operator.approvals", "operator.questions"],
+    },
+  };
+  for (const [key, value] of Object.entries({
+    mode: "trusted-proxy",
+    trustedProxy,
+    identityScopes: { [UMBREL_OWNER]: ["operator.admin"] },
+  })) {
+    if (JSON.stringify(config.gateway.auth[key]) !== JSON.stringify(value)) {
+      config.gateway.auth[key] = value;
+      changed = true;
     }
-    config.gateway.auth.token = crypto.randomBytes(24).toString("hex");
-    token = config.gateway.auth.token;
-    usesAlternateTokenEnv = false;
+  }
+  if (JSON.stringify(config.gateway.trustedProxies) !== JSON.stringify(["127.0.0.1/32"])) {
+    config.gateway.trustedProxies = ["127.0.0.1/32"];
     changed = true;
-    console.log("Patched config: generated gateway auth token");
+  }
+  if ("token" in config.gateway.auth) {
+    delete config.gateway.auth.token;
+    changed = true;
   }
 
-  // Required since openclaw 2026.3.7 when auth is configured.
-  // Always forced to "token" — the proxy only speaks Bearer token auth.
-  if (config.gateway.auth.mode !== "token") {
-    config.gateway.auth.mode = "token";
+  // Direct internal CLI/RPC clients use a password without passing through the
+  // browser proxy. Preserve supported password SecretRefs across restarts.
+  const env = readEnv();
+  let password = resolveGatewaySecretValue(config.gateway.auth.password, env);
+  if (!password) {
+    config.gateway.auth.password = crypto.randomBytes(24).toString("hex");
+    password = config.gateway.auth.password;
     changed = true;
-    console.log("Patched config: set gateway auth mode to token");
+    console.log("Patched config: generated internal gateway password");
+  } else if (config.gateway.auth.password?.source === "env" &&
+             config.gateway.auth.password.id === "OPENCLAW_GATEWAY_TOKEN") {
+    // This variable must be removed for trusted-proxy mode; retain its resolved
+    // password value rather than leaving a reference to a deleted credential.
+    config.gateway.auth.password = password;
+    changed = true;
   }
-
   if (changed) {
     writeConfig(config);
   }
 
-  // Plaintext and OPENCLAW_GATEWAY_TOKEN-backed configs use the conventional
-  // mirror. A SecretRef pointing at another env variable must not be shadowed
-  // by a stale OPENCLAW_GATEWAY_TOKEN, which OpenClaw treats as an override.
-  if (usesAlternateTokenEnv && "OPENCLAW_GATEWAY_TOKEN" in env) {
-    delete env.OPENCLAW_GATEWAY_TOKEN;
+  const previousEnv = JSON.stringify(env);
+  delete env.OPENCLAW_GATEWAY_TOKEN;
+  if (config.gateway.auth.password?.source === "env" &&
+      config.gateway.auth.password.id !== "OPENCLAW_GATEWAY_PASSWORD") {
+    delete env.OPENCLAW_GATEWAY_PASSWORD;
+  } else {
+    env.OPENCLAW_GATEWAY_PASSWORD = password;
+  }
+  if (JSON.stringify(env) !== previousEnv) {
     writeEnv(env);
-    console.log("Removed stale gateway token override for env SecretRef");
-  } else if (!usesAlternateTokenEnv && env.OPENCLAW_GATEWAY_TOKEN !== token) {
-    env.OPENCLAW_GATEWAY_TOKEN = token;
-    writeEnv(env);
-    console.log("Synced gateway token to .env");
+    console.log("Synced internal gateway credentials to .env");
   }
 }
 
@@ -719,8 +741,7 @@ function startOpenclaw() {
 // Read static files at startup
 const SETUP_HTML = fs.readFileSync(path.join(__dirname, "setup.html"), "utf8");
 const LOGO = fs.readFileSync(path.join(__dirname, "logo.webp"));
-// Loading page shown while the gateway is starting up. Keep the refresh in JS
-// because the authentication redirect includes a hash fragment.
+// Loading page shown while the gateway is starting up.
 const LOADING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -779,8 +800,53 @@ h1{margin:0 0 12px;font-size:26px}p{margin:0;color:#B5AEA9;line-height:1.6}.hint
 <body><div class="card"><h1>OpenClaw needs attention</h1><p>The Gateway stopped because its configuration could not be loaded safely. Automatic restarts are paused to prevent a crash loop.</p><div class="hint">Restart the app to retry Umbrel’s automatic repair, or repair the OpenClaw configuration in the app data directory.</div></div></body>
 </html>`;
 
-function getTokenFingerprint(token) {
-  return crypto.createHash("sha256").update(token).digest("base64url").slice(0, 24);
+function isAllowedBrowserRequest(req) {
+  // The proxy now supplies browser identity, so reject cross-origin requests
+  // before rewriting Origin. Umbrel preserves Host and supplies the original
+  // protocol when terminating TLS. Do not accept an HTTP origin on an HTTPS app.
+  const origin = req.headers.origin;
+  if (origin === undefined) {
+    return req.headers["sec-fetch-site"] !== "cross-site" ||
+      (req.method === "GET" && req.headers["sec-fetch-mode"] === "navigate");
+  }
+  try {
+    const parsed = new URL(origin);
+    const protocol = req.headers["x-forwarded-proto"] || (req.socket.encrypted ? "https" : "http");
+    if (!["http", "https"].includes(protocol)) return false;
+    const expected = new URL(`${protocol}://${req.headers.host}`);
+    return ["http:", "https:"].includes(parsed.protocol) &&
+      !parsed.username && !parsed.password && !parsed.search && !parsed.hash &&
+      parsed.pathname === "/" && !expected.username && !expected.password &&
+      parsed.origin === expected.origin;
+  } catch {
+    return false;
+  }
+}
+
+function getGatewayProxyHeaders(req) {
+  if (!isAllowedBrowserRequest(req)) return null;
+  // Attribute this hop to the actual Umbrel proxy socket, never a caller's XFF.
+  // OpenClaw requires a non-loopback forwarded peer. Direct in-container CLI
+  // clients should use the Gateway's password on port 18790 instead.
+  const peer = req.socket.remoteAddress?.replace(/^::ffff:/i, "");
+  if (!net.isIP(peer || "") || peer === "::1" || peer === "::" ||
+      peer === "0.0.0.0" || /^127\./.test(peer)) {
+    return null;
+  }
+  const headers = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    const key = name.toLowerCase();
+    if (key.startsWith("x-forwarded-") || key.startsWith("tailscale-") ||
+        ["forwarded", "x-real-ip", UMBREL_USER_HEADER, "authorization", "proxy-authorization"].includes(key)) {
+      continue;
+    }
+    headers[key] = value;
+  }
+  headers.host = GATEWAY_HOST;
+  if (headers.origin) headers.origin = GATEWAY_ORIGIN;
+  headers["x-forwarded-for"] = peer;
+  headers[UMBREL_USER_HEADER] = UMBREL_OWNER;
+  return headers;
 }
 
 function renderGatewayUnavailable(res) {
@@ -796,46 +862,11 @@ function renderGatewayUnavailable(res) {
 }
 
 function proxyToOpenclaw(req, res) {
-  const token = getGatewayToken();
-
-  // Deliver the secret only in the URL fragment, which is never sent in HTTP
-  // requests or proxy access logs. A one-way, non-secret fingerprint in the
-  // query prevents redirect loops and lets us refresh stale browser tokens.
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const tokenFingerprint = token ? getTokenFingerprint(token) : null;
-  if (token && url.pathname === "/" && url.searchParams.get("auth") !== tokenFingerprint) {
-    const encodedToken = encodeURIComponent(token);
-    res.writeHead(302, {
-      Location: `/?auth=${tokenFingerprint}#token=${encodedToken}`,
-      "Cache-Control": "no-store",
-      "Referrer-Policy": "no-referrer",
-    });
-    res.end();
+  const headers = getGatewayProxyHeaders(req);
+  if (!headers) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("Forbidden");
     return;
-  }
-
-  // Rewrite headers so the gateway sees requests as local.
-  // The gateway checks Origin/Host to block cross-origin requests (anti-CSRF),
-  // but that's redundant here — our proxy is the only thing that can reach the
-  // gateway (it binds to 127.0.0.1 inside the container), and on Umbrel the
-  // entire app is already behind Umbrel's auth proxy.
-  // We also strip forwarding headers (X-Forwarded-For, etc.) that Umbrel's
-  // reverse proxy injects — if the gateway sees these from a source not in
-  // gateway.trustedProxies it treats the connection as non-local and rejects it.
-  const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
-  const headers = { ...req.headers };
-  headers["host"] = gatewayHost;
-  if (headers["origin"]) {
-    headers["origin"] = `http://${gatewayHost}`;
-  }
-  delete headers["x-forwarded-for"];
-  delete headers["x-forwarded-proto"];
-  delete headers["x-forwarded-host"];
-  delete headers["x-forwarded-port"];
-  delete headers["x-real-ip"];
-  delete headers["forwarded"];
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
   }
 
   const options = {
@@ -860,29 +891,16 @@ function proxyToOpenclaw(req, res) {
 
 // Handle WebSocket upgrade requests
 function handleUpgrade(req, socket, head) {
-  const token = getGatewayToken();
+  const headers = getGatewayProxyHeaders(req);
+  if (!headers) {
+    socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    return;
+  }
 
   // Connect to OpenClaw gateway
   const proxySocket = net.connect(OPENCLAW_PORT, "127.0.0.1", () => {
-    // Rebuild the upgrade request with auth header
+    // Rebuild the upgrade request with the same identity policy as HTTP.
     let requestLine = `${req.method} ${req.url} HTTP/1.1\r\n`;
-
-    // Rewrite headers to appear local (same rationale as HTTP proxy above)
-    const gatewayHost = `127.0.0.1:${OPENCLAW_PORT}`;
-    const headers = { ...req.headers };
-    headers["host"] = gatewayHost;
-    if (headers["origin"]) {
-      headers["origin"] = `http://${gatewayHost}`;
-    }
-    delete headers["x-forwarded-for"];
-    delete headers["x-forwarded-proto"];
-    delete headers["x-forwarded-host"];
-    delete headers["x-forwarded-port"];
-    delete headers["x-real-ip"];
-    delete headers["forwarded"];
-    if (token) {
-      headers["authorization"] = `Bearer ${token}`;
-    }
 
     let headerLines = "";
     for (const [key, value] of Object.entries(headers)) {
@@ -924,6 +942,11 @@ function handleUpgrade(req, socket, head) {
 }
 
 const server = http.createServer((req, res) => {
+  if (!isAllowedBrowserRequest(req)) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("Forbidden");
+    return;
+  }
   // Serve static assets for setup UI
   if (req.url === "/logo.webp") {
     res.writeHead(200, { "Content-Type": "image/webp", "Cache-Control": "public, max-age=86400" });
@@ -979,7 +1002,7 @@ wss.on("connection", (ws) => {
     ptyProcess = null;
   }
 
-  // Spawn openclaw onboard with flags that skip everything except provider/API key selection.
+  // Keep the classic terminal setup, including telemetry consent and agent naming.
   // reconcileConfig() normalizes the internal gateway port and auth afterward;
   // this also covers interactive OpenClaw versions that ignore --gateway-port.
   ensureConfigDir();
@@ -1006,8 +1029,7 @@ wss.on("connection", (ws) => {
     rows: 24,
     cwd: CONFIG_DIR,
     env: {
-      ...process.env,
-      ...readEnv(),
+      ...getOpenClawEnv(),
       SHELL: "/bin/bash",
       TERM: "xterm-256color",
     },
@@ -1074,6 +1096,10 @@ wss.on("connection", (ws) => {
 
 // Handle WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
+  if (!isAllowedBrowserRequest(req)) {
+    socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    return;
+  }
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   // Route /api/terminal to the PTY WebSocket server
@@ -1128,15 +1154,10 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error("Failed to initialize OpenClaw wrapper:", err);
-  process.exitCode = 1;
-});
-
 // Graceful shutdown: Docker sends SIGTERM on stop/restart/update.
 // Without this, child processes (gateway, PTY) may get hard-killed
 // mid-write and corrupt config or state files.
-process.on("SIGTERM", () => {
+function shutdown() {
   console.log("Received SIGTERM, shutting down...");
   shuttingDown = true;
   if (gatewayRestartTimer) {
@@ -1150,4 +1171,14 @@ process.on("SIGTERM", () => {
     openclawProcess.kill("SIGTERM");
   }
   server.close();
-});
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("Failed to initialize OpenClaw wrapper:", err);
+    process.exitCode = 1;
+  });
+  process.on("SIGTERM", shutdown);
+}
+
+module.exports = { reconcileConfig, getOpenClawEnv, getGatewayProxyHeaders, isAllowedBrowserRequest };
