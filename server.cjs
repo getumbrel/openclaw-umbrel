@@ -1007,7 +1007,11 @@ wss.on("connection", (ws) => {
   // this also covers interactive OpenClaw versions that ignore --gateway-port.
   ensureConfigDir();
   ensureShellCompletionBypass();
-  const setupPty = pty.spawn("openclaw", [
+  const onboardingEnv = getOpenClawEnv();
+  onboardingEnv.UMBREL_ONBOARD_COMPILE_CACHE = onboardingEnv.NODE_COMPILE_CACHE || "";
+  delete onboardingEnv.NODE_COMPILE_CACHE;
+  const setupPty = pty.spawn(process.execPath, [
+    path.join(__dirname, "onboard.cjs"),
     "onboard",
     "--classic",
     "--flow", "quickstart",
@@ -1029,7 +1033,7 @@ wss.on("connection", (ws) => {
     rows: 24,
     cwd: CONFIG_DIR,
     env: {
-      ...getOpenClawEnv(),
+      ...onboardingEnv,
       SHELL: "/bin/bash",
       TERM: "xterm-256color",
     },

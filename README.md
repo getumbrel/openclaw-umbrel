@@ -43,9 +43,9 @@ CLI or the internal Gateway port with its password.
 
 ## Tests
 
-Run `npm ci` and `npm test` for config migration, environment, and proxy-boundary
-tests. The image-shipped plugin test also runs when testing inside the wrapper
-image, where `/app/openclaw-context` is available.
+Run `npm ci` and `npm test` for config migration, environment, proxy-boundary,
+and onboarding completion tests. The image-shipped plugin test also runs when
+testing inside the wrapper image, where `/app/openclaw-context` is available.
 
 For integration checks, start a disposable configured wrapper using the current
 source, then run `OPENCLAW_TEST_URL=http://127.0.0.1:<port> npm run test:integration`.

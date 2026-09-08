@@ -59,6 +59,7 @@ RUN printf '#!/bin/bash\necho "Error: apt is not available. Please use brew inst
 # read-only boundary. These files intentionally live outside /data so container
 # runtime edits are disposable and image updates overwrite the managed context.
 COPY --chown=node:node server.cjs /app/setup-server.cjs
+COPY --chown=node:node onboard.cjs /app/onboard.cjs
 COPY --chown=node:node setup.html /app/setup.html
 COPY --chown=node:node logo.webp /app/logo.webp
 COPY openclaw-context /app/openclaw-context
