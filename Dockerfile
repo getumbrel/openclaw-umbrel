@@ -73,4 +73,4 @@ ENV PATH="/data/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.
 
 # Run the setup/proxy server
 CMD ["node", "/app/setup-server.cjs"]
-EXPOSE 18789
+EXPOSE 18789 18791
