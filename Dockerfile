@@ -19,7 +19,7 @@ RUN mkdir -p /data && chown node:node /data
 # Install OpenClaw globally from npm. Keep npm lifecycle-generated OpenClaw
 # state out of the runtime home so startup derives state from the installed
 # version and the user's persisted configuration.
-RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.9.2 \
+RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.9.4 \
     && rm -rf /tmp/openclaw-install-state /data/.openclaw
 
 # Redirect future npm global installs to persistent volume
