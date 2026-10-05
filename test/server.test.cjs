@@ -8,13 +8,21 @@ const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-wrapper-test-")
 const configFile = path.join(stateDir, "openclaw.json");
 const envFile = path.join(stateDir, ".env");
 process.env.OPENCLAW_STATE_DIR = stateDir;
-const { reconcileConfig, getOpenClawEnv, getGatewayProxyHeaders, isAllowedBrowserRequest } = require("../server.cjs");
+const {
+  reconcileConfig,
+  getOpenClawEnv,
+  getGatewayProxyHeaders,
+  getNativeGatewayProxyHeaders,
+  translateNativeConnectFrame,
+  isAllowedBrowserRequest,
+} = require("../server.cjs");
 
 beforeEach(() => {
   fs.writeFileSync(configFile, JSON.stringify({ wizard: { lastRunVersion: "2026.7.1-2" } }));
   fs.writeFileSync(envFile, "");
   delete process.env.OPENCLAW_GATEWAY_TOKEN;
   delete process.env.OPENCLAW_GATEWAY_PASSWORD;
+  delete process.env.UMBREL_OPENCLAW_REMOTE_PASSWORD;
 });
 after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
 
@@ -35,6 +43,8 @@ test("migrates legacy token auth while retaining user settings and a stable inte
   process.env.OPENCLAW_GATEWAY_PASSWORD = "inherited-stale-password";
   reconcileConfig();
   const result = JSON.parse(fs.readFileSync(configFile));
+  assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(envFile).mode & 0o777, 0o600);
   assert.deepEqual(result.agents, config.agents);
   assert.deepEqual(result.channels, config.channels);
   assert.deepEqual(result.wizard, config.wizard);
@@ -45,6 +55,7 @@ test("migrates legacy token auth while retaining user settings and a stable inte
   assert.equal(result.gateway.controlUi.basePath, "/");
   assert.ok(result.gateway.controlUi.allowedOrigins.includes("http://127.0.0.1:18790"));
   assert.deepEqual(result.gateway.trustedProxies, ["127.0.0.1/32"]);
+  assert.equal(result.gateway.nodes.pairing.autoApproveLocal, false);
   assert.deepEqual(result.gateway.auth.identityScopes, { "umbrel-owner": ["operator.admin"] });
   assert.equal(result.gateway.auth.trustedProxy.allowLoopback, true);
   assert.equal(result.gateway.auth.trustedProxy.deviceAutoApprove.enabled, true);
@@ -70,6 +81,38 @@ test("preserves env-backed passwords without stale overrides or losing provider 
   assert.deepEqual(JSON.parse(fs.readFileSync(configFile)).gateway.auth.password, password);
   assert.doesNotMatch(fs.readFileSync(envFile, "utf8"), /^OPENCLAW_GATEWAY_PASSWORD=/m);
   assert.equal(getOpenClawEnv().OPENCLAW_GATEWAY_PASSWORD, "current-password");
+});
+
+test("uses Umbrel's deterministic app password for new direct-client credentials", () => {
+  process.env.UMBREL_OPENCLAW_REMOTE_PASSWORD = "test-umbrel-password";
+  reconcileConfig();
+  const config = JSON.parse(fs.readFileSync(configFile));
+  assert.deepEqual(config.gateway.auth.password, {
+    source: "env",
+    provider: "default",
+    id: "OPENCLAW_GATEWAY_PASSWORD",
+  });
+  assert.equal(getOpenClawEnv().OPENCLAW_GATEWAY_PASSWORD, "test-umbrel-password");
+  assert.match(fs.readFileSync(envFile, "utf8"), /^OPENCLAW_GATEWAY_PASSWORD=test-umbrel-password$/m);
+});
+
+test("rotates an unreachable legacy token to Umbrel's discoverable app password", () => {
+  fs.writeFileSync(configFile, JSON.stringify({ gateway: { auth: {
+    mode: "token",
+    token: "legacy-wrapper-token",
+  } } }));
+  fs.writeFileSync(envFile, "OPENCLAW_GATEWAY_TOKEN=legacy-wrapper-token\n");
+  process.env.UMBREL_OPENCLAW_REMOTE_PASSWORD = "test-umbrel-password";
+  reconcileConfig();
+  const config = JSON.parse(fs.readFileSync(configFile));
+  assert.deepEqual(config.gateway.auth.password, {
+    source: "env",
+    provider: "default",
+    id: "OPENCLAW_GATEWAY_PASSWORD",
+  });
+  assert.equal(config.gateway.auth.token, undefined);
+  assert.equal(getOpenClawEnv().OPENCLAW_GATEWAY_PASSWORD, "test-umbrel-password");
+  assert.doesNotMatch(fs.readFileSync(envFile, "utf8"), /OPENCLAW_GATEWAY_TOKEN=/);
 });
 
 test("enforces supervisor environment even when the persisted environment overrides it", () => {
@@ -153,4 +196,58 @@ test("uses socket attribution and refuses invented client addresses for local wr
     assert.equal(getGatewayProxyHeaders(request({ "x-forwarded-for": "192.0.2.1" }, { socket: { remoteAddress } })), null);
   }
   assert.equal(getGatewayProxyHeaders(request({}, { socket: { remoteAddress: "fd00::2" } }))["x-forwarded-for"], "fd00::2");
+});
+
+test("native Gateway proxy preserves WebSocket protocol data but strips ambient and spoofed identity", () => {
+  const headers = getNativeGatewayProxyHeaders(request({
+    upgrade: "websocket",
+    connection: "Upgrade",
+    origin: "https://native.example",
+    cookie: "umbrel=secret",
+    authorization: "Bearer should-not-cross",
+    "proxy-authorization": "secret",
+    "x-umbrel-user": "umbrel-owner",
+    "x-umbrel-custom": "spoofed",
+    "x-forwarded-for": "127.0.0.1",
+    "x-forwarded-proto": "https",
+    "x-real-ip": "127.0.0.1",
+    forwarded: "for=127.0.0.1",
+    "tailscale-user-login": "owner@example.com",
+    "x-tailscale-user-login": "owner@example.com",
+    "sec-websocket-key": "test-key",
+    "sec-websocket-version": "13",
+  }));
+  assert.equal(headers.host, undefined);
+  assert.equal(headers.origin, "http://127.0.0.1:18790");
+  assert.equal(headers["sec-websocket-key"], undefined);
+  for (const key of [
+    "cookie", "authorization", "proxy-authorization", "x-umbrel-user", "x-umbrel-custom",
+    "x-forwarded-for", "x-forwarded-proto", "x-real-ip", "forwarded",
+    "tailscale-user-login", "x-tailscale-user-login",
+  ]) {
+    assert.equal(headers[key], undefined, key);
+  }
+});
+
+test("native Gateway proxy accepts only WebSocket GET upgrades", () => {
+  assert.equal(getNativeGatewayProxyHeaders(request({ upgrade: "h2c" })), null);
+  assert.equal(getNativeGatewayProxyHeaders(request({ upgrade: "websocket" }, { method: "POST" })), null);
+});
+
+test("native Gateway proxy maps the app's token field to password auth without changing its value", () => {
+  const frame = {
+    type: "req",
+    id: "connect",
+    method: "connect",
+    params: { auth: { token: "caller-supplied-secret" }, client: { id: "openclaw-macos" } },
+  };
+  const translated = JSON.parse(translateNativeConnectFrame(Buffer.from(JSON.stringify(frame)), false));
+  assert.equal(translated.params.auth.password, "caller-supplied-secret");
+  assert.equal(translated.params.auth.token, "caller-supplied-secret");
+  assert.deepEqual(translated.params.client, frame.params.client);
+
+  assert.equal(translateNativeConnectFrame(Buffer.from("not-json"), false), null);
+  assert.equal(translateNativeConnectFrame(Buffer.from("binary"), true), null);
+  assert.equal(translateNativeConnectFrame(Buffer.alloc(64 * 1024 + 1), false), null);
+  assert.equal(translateNativeConnectFrame(Buffer.from(JSON.stringify({ type: "req", method: "health" })), false), null);
 });

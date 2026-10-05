@@ -15,6 +15,9 @@ const CONFIG_FILE = path.join(CONFIG_DIR, "openclaw.json");
 const ENV_FILE = path.join(CONFIG_DIR, ".env");
 const PORT = parseInt(process.env.SETUP_PORT || "18789");
 const OPENCLAW_PORT = 18790; // Internal port for OpenClaw gateway
+const NATIVE_GATEWAY_PORT = parseInt(process.env.NATIVE_GATEWAY_PORT || "18791");
+const GATEWAY_MAX_PAYLOAD_BYTES = 25 * 1024 * 1024;
+const GATEWAY_MAX_PREAUTH_PAYLOAD_BYTES = 64 * 1024;
 const GATEWAY_HOST = `127.0.0.1:${OPENCLAW_PORT}`;
 const GATEWAY_ORIGIN = `http://${GATEWAY_HOST}`;
 const UMBREL_OWNER = "umbrel-owner";
@@ -93,15 +96,21 @@ function writeEnv(env) {
     }
   }
   fs.writeFileSync(ENV_FILE, lines.join("\n") + "\n", { mode: 0o600 });
+  fs.chmodSync(ENV_FILE, 0o600);
 }
 
 function writeConfig(config) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+  fs.chmodSync(CONFIG_FILE, 0o600);
 }
 
 function ensureConfigDir() {
   if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  }
+  fs.chmodSync(CONFIG_DIR, 0o700);
+  for (const file of [CONFIG_FILE, ENV_FILE]) {
+    if (fs.existsSync(file)) fs.chmodSync(file, 0o600);
   }
   const workspaceDir = path.join(CONFIG_DIR, "workspace");
   if (!fs.existsSync(workspaceDir)) {
@@ -467,14 +476,45 @@ function reconcileConfig() {
     config.gateway.trustedProxies = ["127.0.0.1/32"];
     changed = true;
   }
+  if (!config.gateway.nodes || typeof config.gateway.nodes !== "object" || Array.isArray(config.gateway.nodes)) {
+    config.gateway.nodes = {};
+  }
+  if (!config.gateway.nodes.pairing || typeof config.gateway.nodes.pairing !== "object" || Array.isArray(config.gateway.nodes.pairing)) {
+    config.gateway.nodes.pairing = {};
+  }
+  // The native listener is a loopback proxy, so the Gateway cannot infer that
+  // its caller is remote. Require explicit device approval instead of applying
+  // OpenClaw's ordinary direct-loopback auto-approval policy.
+  if (config.gateway.nodes.pairing.autoApproveLocal !== false) {
+    config.gateway.nodes.pairing.autoApproveLocal = false;
+    changed = true;
+  }
   if ("token" in config.gateway.auth) {
     delete config.gateway.auth.token;
     changed = true;
   }
 
-  // Direct internal CLI/RPC clients use a password without passing through the
-  // browser proxy. Preserve supported password SecretRefs across restarts.
+  // Direct CLI/RPC and native clients use a password without passing through
+  // the browser proxy. On Umbrel, use the app's deterministic password so the
+  // owner can retrieve the credential from the ordinary app settings. This
+  // intentionally replaces the legacy generated token, which was not usable
+  // through umbrelOS' authenticated app proxy.
   const env = readEnv();
+  const previousEnv = JSON.stringify(env);
+  if (process.env.UMBREL_OPENCLAW_REMOTE_PASSWORD) {
+    const passwordRef = {
+      source: "env",
+      provider: "default",
+      id: "OPENCLAW_GATEWAY_PASSWORD",
+    };
+    if (JSON.stringify(config.gateway.auth.password) !== JSON.stringify(passwordRef)) {
+      config.gateway.auth.password = passwordRef;
+      changed = true;
+    }
+    if (env.OPENCLAW_GATEWAY_PASSWORD !== process.env.UMBREL_OPENCLAW_REMOTE_PASSWORD) {
+      env.OPENCLAW_GATEWAY_PASSWORD = process.env.UMBREL_OPENCLAW_REMOTE_PASSWORD;
+    }
+  }
   let password = resolveGatewaySecretValue(config.gateway.auth.password, env);
   if (!password) {
     config.gateway.auth.password = crypto.randomBytes(24).toString("hex");
@@ -492,7 +532,6 @@ function reconcileConfig() {
     writeConfig(config);
   }
 
-  const previousEnv = JSON.stringify(env);
   delete env.OPENCLAW_GATEWAY_TOKEN;
   if (config.gateway.auth.password?.source === "env" &&
       config.gateway.auth.password.id !== "OPENCLAW_GATEWAY_PASSWORD") {
@@ -941,6 +980,142 @@ function handleUpgrade(req, socket, head) {
   });
 }
 
+function getNativeGatewayProxyHeaders(req) {
+  if (req.method !== "GET" || String(req.headers.upgrade || "").toLowerCase() !== "websocket") {
+    return null;
+  }
+  const headers = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    const key = name.toLowerCase();
+    if (key.startsWith("x-forwarded-") || key.startsWith("x-umbrel-") ||
+        key.startsWith("tailscale-") || key.startsWith("x-tailscale-") ||
+        key.startsWith("sec-websocket-") ||
+        ["connection", "content-length", "cookie", "forwarded", "host", "upgrade",
+          "origin", "x-real-ip", "authorization", "proxy-authorization"].includes(key)) {
+      continue;
+    }
+    headers[key] = value;
+  }
+  // The native relay necessarily reaches the Gateway over loopback. Supplying
+  // a fixed, allowed Origin makes OpenClaw apply its browser-context pairing
+  // protections and prevents remote callers from inheriting privileged
+  // no-Origin loopback exceptions. Never forward a caller-controlled Origin.
+  headers.origin = GATEWAY_ORIGIN;
+  return headers;
+}
+
+function translateNativeConnectFrame(data, isBinary) {
+  const byteLength = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data);
+  if (isBinary || byteLength > GATEWAY_MAX_PREAUTH_PAYLOAD_BYTES) return null;
+  try {
+    const frame = JSON.parse(data.toString());
+    if (frame?.type !== "req" || frame?.method !== "connect" || !frame.params) {
+      return null;
+    }
+    if (!frame.params.auth || typeof frame.params.auth !== "object" ||
+        typeof frame.params.auth.token !== "string" || frame.params.auth.password) {
+      return data;
+    }
+    frame.params.auth.password = frame.params.auth.token;
+    return JSON.stringify(frame);
+  } catch {
+    return null;
+  }
+}
+
+const nativeWss = new WebSocket.Server({
+  noServer: true,
+  maxPayload: GATEWAY_MAX_PAYLOAD_BYTES,
+});
+
+// Native clients cannot complete umbrelOS browser authentication. This second,
+// WebSocket-only listener passes their Gateway credential and device identity to
+// OpenClaw without injecting the Umbrel owner's trusted-proxy identity. Current
+// native apps label the only credential field "token"; trusted-proxy fallback
+// accepts a password credential in auth.password, so add that alias while
+// retaining auth.token for the device-signature payload. The caller-supplied
+// value remains unchanged and the Gateway still validates it.
+function handleNativeUpgrade(req, socket, head) {
+  const headers = getNativeGatewayProxyHeaders(req);
+  if (!headers) {
+    socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    return;
+  }
+  if (!isConfigured() || ptyProcess) {
+    socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+    return;
+  }
+  if (!openclawProcess) startOpenclaw();
+
+  nativeWss.handleUpgrade(req, socket, head, (client) => {
+    const upstream = new WebSocket(`ws://${GATEWAY_HOST}${req.url || "/"}`, { headers });
+    let connectForwarded = false;
+    let closedByClient = false;
+
+    client.on("message", (data, isBinary) => {
+      let outbound = data;
+      if (!connectForwarded) {
+        outbound = translateNativeConnectFrame(data, isBinary);
+        if (outbound == null) {
+          const byteLength = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data);
+          const code = byteLength > GATEWAY_MAX_PREAUTH_PAYLOAD_BYTES ? 1009 : 1008;
+          client.close(code, "First message must be a valid Gateway connect request");
+          closedByClient = true;
+          upstream.close();
+          return;
+        }
+        connectForwarded = true;
+      }
+      if (upstream.readyState !== WebSocket.OPEN) {
+        client.close(1013, "Gateway is starting");
+        closedByClient = true;
+        upstream.close();
+        return;
+      }
+      upstream.send(outbound, { binary: isBinary });
+    });
+    upstream.on("message", (data, isBinary) => {
+      if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
+    });
+
+    upstream.on("close", (code, reason) => {
+      if (client.readyState !== WebSocket.OPEN) return;
+      if (code === 1006) client.terminate();
+      else client.close(code, reason);
+    });
+    client.on("close", (code, reason) => {
+      closedByClient = true;
+      if (upstream.readyState === WebSocket.CONNECTING) upstream.close();
+      else if (upstream.readyState === WebSocket.OPEN) {
+        if (code === 1006) upstream.terminate();
+        else upstream.close(code, reason);
+      }
+    });
+    upstream.on("error", (err) => {
+      if (!closedByClient && err.code !== "ECONNREFUSED") {
+        console.error("Native Gateway upstream error:", err.message);
+      }
+      if (client.readyState === WebSocket.OPEN) client.close(1013, "Gateway is starting");
+    });
+    client.on("error", (err) => {
+      console.error("Native Gateway client error:", err.message);
+      upstream.terminate();
+    });
+  });
+}
+
+const nativeGatewayServer = http.createServer((_req, res) => {
+  res.writeHead(426, {
+    "Content-Type": "text/plain",
+    "Cache-Control": "no-store",
+    "Connection": "close",
+    "Upgrade": "websocket",
+  });
+  res.end("This endpoint accepts authenticated OpenClaw Gateway WebSocket connections only.\n");
+});
+
+nativeGatewayServer.on("upgrade", handleNativeUpgrade);
+
 const server = http.createServer((req, res) => {
   if (!isAllowedBrowserRequest(req)) {
     res.writeHead(403, { "Content-Type": "text/plain" });
@@ -1156,6 +1331,9 @@ async function main() {
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Setup server listening on port ${PORT}`);
   });
+  nativeGatewayServer.listen(NATIVE_GATEWAY_PORT, "0.0.0.0", () => {
+    console.log(`Native Gateway WebSocket listener available on port ${NATIVE_GATEWAY_PORT}`);
+  });
 }
 
 // Graceful shutdown: Docker sends SIGTERM on stop/restart/update.
@@ -1175,6 +1353,7 @@ function shutdown() {
     openclawProcess.kill("SIGTERM");
   }
   server.close();
+  nativeGatewayServer.close();
 }
 
 if (require.main === module) {
@@ -1185,4 +1364,11 @@ if (require.main === module) {
   process.on("SIGTERM", shutdown);
 }
 
-module.exports = { reconcileConfig, getOpenClawEnv, getGatewayProxyHeaders, isAllowedBrowserRequest };
+module.exports = {
+  reconcileConfig,
+  getOpenClawEnv,
+  getGatewayProxyHeaders,
+  getNativeGatewayProxyHeaders,
+  translateNativeConnectFrame,
+  isAllowedBrowserRequest,
+};

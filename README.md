@@ -20,6 +20,7 @@ This is a containerized version of OpenClaw with seamless onboarding on umbrelOS
 - apt/apt-get disabled with a message telling openclaw to use brew instead
 - Globally installed node modules persisted between app updates
 - One-click Control UI access through Umbrel's authenticated proxy, with same-origin browser checks and automatic browser device enrollment
+- Direct native Gateway connections over a private LAN or Tailnet, protected by the app's deterministic password and explicit device pairing
 - Container-owned Gateway supervision and updates, with OpenClaw self-updates disabled
 
 This creates a seamless one click install experience for OpenClaw on umbrelOS.
@@ -33,13 +34,27 @@ Origin against the original Host and protocol before forwarding HTTP or WebSocke
 requests. Umbrel's proxy must preserve Host and set `X-Forwarded-Proto` when
 terminating TLS.
 
+A separate WebSocket-only listener on `18791` is intended for native clients.
+It strips proxy identity, forwarding, cookie, and HTTP authorization headers and
+never grants the Umbrel owner's browser identity. Clients must authenticate with
+the deterministic app password shown in Umbrel's app settings, then complete
+OpenClaw device and node-capability pairing. Plain HTTP requests to this listener
+receive `426 Upgrade Required`.
+
 On upgrade, the wrapper removes the retired device-auth flags and shared Gateway
 token, enables trusted-proxy browser authentication, and provisions a persistent
-password for direct internal CLI/RPC clients. Browser device enrollment grants
+password for direct CLI/RPC and native clients. On Umbrel the password is rotated
+to the app's deterministic password so the owner can retrieve it from app
+settings. Browser device enrollment grants
 ordinary UI scopes; admin access is granted to the verified Umbrel identity on
 each connection. Gateway proxy requests from loopback are rejected because they
 cannot provide a non-loopback proxy peer; internal clients should use OpenClaw's
 CLI or the internal Gateway port with its password.
+
+The native listener is suitable for trusted private networks such as a home LAN
+or Tailnet. Do not forward it directly to the public Internet: `ws://` is
+unencrypted and the Gateway is a high-authority control surface. Use a properly
+authenticated TLS endpoint (`wss://`) if public-network access is required.
 
 ## Tests
 
