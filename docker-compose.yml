@@ -7,12 +7,15 @@ services:
     init: true
     environment:
       APP_SEED: ${APP_SEED:-dev} # Provided by umbrelOS; fallback for local dev
+      UMBREL_OPENCLAW_REMOTE_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD before starting the native Gateway listener}
+      NATIVE_GATEWAY_PORT: 18791
       OPENCLAW_STATE_DIR: /data/.openclaw
       OPENCLAW_SERVICE_REPAIR_POLICY: external
       OPENCLAW_SUPERVISOR_MODE: external
       OPENCLAW_NO_RESPAWN: "1"
     ports:
       - "18789:18789"
+      - "18791:18791"
     volumes:
       - $PWD/data:/data
       - $PWD/data/linuxbrew:/home/linuxbrew
