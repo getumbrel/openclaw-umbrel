@@ -97,11 +97,38 @@ test("a state symlink outside the snapshot boundary is refused before commands o
   await assert.rejects(ensureUpgrade(f.options), /outside the recoverable/);
   assert.equal(f.calls.length, 0);
 });
+test("an internal directory link cannot conceal a second link outside the snapshot", async () => {
+  const f = fixture("nested-outside-link");
+  const directory = path.join(f.home, "linked-account");
+  fs.mkdirSync(directory);
+  fs.symlinkSync(directory, path.join(f.stateDir, "account"));
+  fs.symlinkSync(f.stateDir, path.join(directory, "cycle"));
+  fs.symlinkSync(root, path.join(directory, "outside"));
+  const before = inventory(f.home);
+  await assert.rejects(ensureUpgrade(f.options), /outside the recoverable/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(fs.existsSync(path.join(f.home, DIRECTORY, "journal.json")), false);
+  sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), before);
+});
 test("an external custom workspace is refused before maintenance can write outside the snapshot", async () => {
   const f = fixture("external-workspace");
   fs.writeFileSync(path.join(f.stateDir, "openclaw.json"), JSON.stringify({ agents: { defaults: { workspace: root } } }));
   await assert.rejects(ensureUpgrade(f.options), /Configured data path is outside/);
   assert.equal(f.calls.length, 0);
+});
+test("custom agent and environment credential directories cannot conceal external data links", async () => {
+  for (const source of ["config", "env"]) {
+    const f = fixture(`custom-link-${source}`);
+    const directory = path.join(f.home, "credentials");
+    fs.mkdirSync(directory);
+    fs.symlinkSync(root, path.join(directory, "external"));
+    if (source === "config") fs.writeFileSync(path.join(f.stateDir, "openclaw.json"), JSON.stringify({ agents: { entries: { custom: { agentDir: directory } } } }));
+    else fs.appendFileSync(path.join(f.stateDir, ".env"), `OPENCLAW_OAUTH_DIR=${directory}\n`);
+    const before = inventory(f.home);
+    await assert.rejects(ensureUpgrade(f.options), /outside the recoverable/);
+    assert.equal(f.calls.length, 0);
+    sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), before);
+  }
 });
 test("custom agent databases also prevent incompatible bridge runtimes from starting", async () => {
   const f = fixture("custom-agent");

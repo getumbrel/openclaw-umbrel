@@ -98,13 +98,18 @@ function compatible(schemas, pkg) {
 }
 
 function inspectPaths(home, stateDir) {
+  const visited = new Set();
   function visit(directory) {
     if (!fs.existsSync(directory)) return;
+    const physical = fs.realpathSync(directory);
+    if (visited.has(physical)) return;
+    visited.add(physical);
     for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
       const file = path.join(directory, item.name);
       if (item.isSymbolicLink()) {
         const target = fs.realpathSync(file);
         if (!inside(home, target) || inside(path.join(home, DIRECTORY), target)) throw new Error(`State links outside the recoverable persistent home: ${path.relative(stateDir, file)}`);
+        if (fs.statSync(file).isDirectory()) visit(file);
       } else if (item.isDirectory()) visit(file);
     }
   }
@@ -123,6 +128,7 @@ function inspectConfigPaths(home, stateDir, targetRoot) {
     let existing = file;
     while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
     if (!inside(home, file) || !inside(home, fs.realpathSync(existing)) || inside(path.join(home, DIRECTORY), file) || inside(path.join(home, DIRECTORY), fs.realpathSync(existing))) throw new Error(`Configured data path is outside the recoverable persistent home: ${label}`);
+    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) inspectPaths(home, fs.realpathSync(file));
     return file;
   }
   function inspect(file) {
@@ -261,6 +267,7 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
       let existing = path.resolve(env[key]);
       while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
       if (!path.isAbsolute(env[key]) || !inside(home, env[key]) || !inside(home, fs.realpathSync(existing)) || inside(path.join(home, DIRECTORY), env[key]) || inside(path.join(home, DIRECTORY), fs.realpathSync(existing))) throw new Error(`Environment data path is outside the recoverable persistent home: ${key}`);
+      if (fs.existsSync(env[key]) && fs.statSync(env[key]).isDirectory()) inspectPaths(home, fs.realpathSync(env[key]));
     }
     for (const key of ["OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_AGENT_DIR", "PI_CODING_AGENT_DIR"]) {
       if (env[key]) throw new Error(`An alternate state selector requires inspection before migration: ${key}`);
