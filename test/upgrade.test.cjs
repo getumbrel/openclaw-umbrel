@@ -123,6 +123,38 @@ test("original Matrix crypto layout pauses before snapshots or any runtime can t
   assert.equal(f.calls.length, 0);
   sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), before);
 });
+test("retired Matrix account sidecars stop before snapshots even when the channel is disabled", async () => {
+  for (const name of ["thread-bindings.json", "startup-verification.json", "recovery-key.json", "legacy-crypto-migration.json", "crypto-idb-snapshot.json", "storage-meta.json", "inbound-dedupe.json"]) {
+    const f = fixture(`matrix-${name}`);
+    const directory = path.join(f.stateDir, "matrix/accounts/disabled/token-hash");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, name), '{"synthetic":"retained"}');
+    const before = inventory(f.home);
+    await assert.rejects(ensureUpgrade(f.options), /2026.9.5 Doctor and a Matrix channel start/);
+    assert.equal(f.calls.length, 0);
+    assert.equal(fs.existsSync(path.join(f.home, DIRECTORY, "journal.json")), false);
+    sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), before);
+  }
+});
+test("Matrix sidecars in an internal symlinked account are also refused", async () => {
+  const f = fixture("matrix-linked");
+  const directory = path.join(f.home, "retained-matrix-account");
+  fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, "crypto-idb-snapshot.json"), '{"synthetic":"room keys"}');
+  fs.mkdirSync(path.join(f.stateDir, "matrix"));
+  fs.symlinkSync(directory, path.join(f.stateDir, "matrix/account"));
+  const before = inventory(f.home);
+  await assert.rejects(ensureUpgrade(f.options), /2026.9.5 Doctor and a Matrix channel start/);
+  assert.equal(f.calls.length, 0);
+  sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), before);
+});
+test("archived Matrix sidecars do not block a migrated account", async () => {
+  const f = fixture("matrix-archived");
+  const directory = path.join(f.stateDir, "matrix/accounts/default/token-hash");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "crypto-idb-snapshot.json.migrated"), '{"synthetic":"archived room keys"}');
+  assert.equal((await ensureUpgrade(f.options)).upgraded, true);
+});
 test("reconciliation cannot discard a saved environment credential", async () => {
   const f = fixture("lost-env");
   await assert.rejects(ensureUpgrade({ ...f.options, reconcile: () => fs.writeFileSync(path.join(f.stateDir, ".env"), "OPENCLAW_GATEWAY_PASSWORD=replaced\n") }), /Saved environment setting did not survive/);

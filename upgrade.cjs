@@ -174,6 +174,29 @@ function requiresOldDataImporter(stateDir) {
   }
   return found;
 }
+function assertSupportedMatrixState(home, stateDir) {
+  if (["matrix/bot-storage.json", "matrix/crypto"].some(file => fs.existsSync(path.join(stateDir, file)))) {
+    throw new Error("The original Matrix storage layout requires the 2026.6 migration and Gateway start, followed by 2026.9.5 and a Matrix start; this update is paused with the original data unchanged");
+  }
+  const retired = new Set(["thread-bindings.json", "startup-verification.json", "recovery-key.json", "legacy-crypto-migration.json", "crypto-idb-snapshot.json", "storage-meta.json", "inbound-dedupe.json"]);
+  const visited = new Set();
+  function visit(directory) {
+    if (!fs.existsSync(directory)) return;
+    const physical = fs.realpathSync(directory);
+    if (!inside(home, physical) || inside(path.join(home, DIRECTORY), physical)) throw new Error("Matrix state is outside the recoverable persistent home");
+    if (visited.has(physical)) return;
+    visited.add(physical);
+    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, item.name);
+      // Even a disabled account must not silently lose its future import path.
+      // Archived *.migrated files are evidence, not pending imports.
+      if (retired.has(item.name)) throw new Error(`Retired Matrix state (${item.name}) requires 2026.9.5 Doctor and a Matrix channel start; this update is paused with the original data unchanged`);
+      const stat = item.isSymbolicLink() ? fs.statSync(file) : item;
+      if (stat.isDirectory()) visit(file);
+    }
+  }
+  visit(path.join(stateDir, "matrix"));
+}
 function pendingWorkboard(stateDir) {
   const file = path.join(stateDir, "state/openclaw.sqlite");
   if (!fs.existsSync(file)) return false;
@@ -216,7 +239,7 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
     const existing = fs.existsSync(stateDir) && fs.readdirSync(stateDir).some(name => name !== "workspace" || fs.readdirSync(path.join(stateDir, name)).length > 0);
     if (!existing) return { upgraded: false, fresh: true, target: target.version };
     if (!fs.existsSync(configFile)) throw new Error("Retained OpenClaw data has no configuration; refusing to treat it as a fresh install");
-    if (["matrix/bot-storage.json", "matrix/crypto"].some(file => fs.existsSync(path.join(stateDir, file)))) throw new Error("The original Matrix storage layout requires the 2026.6 migration and encrypted-room recovery; this update is paused with the original data unchanged");
+    assertSupportedMatrixState(home, stateDir);
     inspectConfigPaths(storage.home, stateDir, targetRoot);
     progress("Creating and verifying the complete pre-upgrade snapshot");
     journal = storage.snapshot(target.version);

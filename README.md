@@ -131,9 +131,13 @@ replies, channel delivery or encrypted Matrix room recovery. CI runs both
 evidence suites on native amd64 and arm64.
 
 **Release remains held for unsupported retained layouts.** In particular,
-upstream's [original Matrix layout](https://github.com/openclaw/openclaw/blob/v2026.9.7/docs/channels/matrix-migration.md#upgrading-from-openclaw-releases-older-than-20264)
-requires a 2026.6 bridge and a Gateway start, which this implementation refuses
-before touching data. Retired channel/plugin data needing 9.5 beside newer
+upstream's [current Matrix migration guide](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/channels/matrix-migration.md)
+requires a 2026.6 bridge and a Gateway start for the original flat layout,
+followed by 2026.9.5 Doctor and a Matrix channel start. Retired account-scoped
+Matrix JSON sidecars also need 2026.9.5 Doctor and a Matrix start. The wrapper
+refuses both layouts before touching data, including disabled accounts; a
+Gateway canary with channels disabled cannot validate these imports or room-key
+recovery. Retired channel/plugin data needing 9.5 beside newer
 databases, retired Workboard data already on schema 20, and unresolved canonical
 OAuth references also stop safely rather than running an incompatible runtime.
 These refusals protect data; they do not satisfy a universal automatic upgrade.

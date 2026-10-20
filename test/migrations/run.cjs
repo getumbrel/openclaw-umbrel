@@ -63,7 +63,7 @@ if (production) {
   fs.writeFileSync(path.join(reportDir, "upgrade-matrix.json"), JSON.stringify({
     target, architecture: process.arch, passed: code === 0 && cases.length === 12, cases,
     productionReady: false,
-    releaseBlockers: ["Original Matrix layout needs a 2026.6 bridge and Gateway recovery", "Older channel/plugin data beside newer schemas needs compatible importers", "Canonical SQLite-only unresolved OAuth references and schema-20 legacy Workboard are refused", "Live provider/channel delivery and encrypted Matrix recovery remain unverified"],
+    releaseBlockers: ["Original Matrix layout needs 2026.6 then 2026.9.5 with channel starts; retired account sidecars also need a 9.5 Matrix start", "Older channel/plugin data beside newer schemas needs compatible importers", "Canonical SQLite-only unresolved OAuth references and schema-20 legacy Workboard are refused", "Live provider/channel delivery and encrypted Matrix recovery remain unverified"],
   }, null, 2));
 }
 console.log(`Migration evidence retained at ${reportDir}`);
