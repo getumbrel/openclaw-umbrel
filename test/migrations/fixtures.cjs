@@ -66,20 +66,20 @@ function addLegacy(state, kind) {
   } else throw new Error(`Unknown legacy fixture: ${kind}`);
 }
 
-function addHistoryAndCredentials(state) {
+function addHistoryAndCredentials(state, { agentId = "main", id = sessionId, profileId = "openai:migration-test", account = credential, messages = conversation, agentDir = path.join(state, "agents", agentId, "agent"), workspace = path.join(state, "workspace") } = {}) {
   const now = Date.now(), timestamp = new Date(now).toISOString();
-  const sessions = path.join(state, "agents/main/sessions");
-  const transcript = path.join(sessions, `${sessionId}.jsonl`);
+  const sessions = path.join(state, "agents", agentId, "sessions");
+  const transcript = path.join(sessions, `${id}.jsonl`);
   writeJson(path.join(sessions, "sessions.json"), {
-    "agent:main:main": { sessionId, updatedAt: now, sessionFile: transcript, chatType: "direct", modelProvider: "openai", model: "gpt-4.1-mini" },
+    [`agent:${agentId}:main`]: { sessionId: id, updatedAt: now, sessionFile: transcript, chatType: "direct", modelProvider: "openai", model: "gpt-4.1-mini" },
   });
   const entries = [
-    { type: "session", version: 3, id: sessionId, timestamp, cwd: path.join(state, "workspace") },
-    { type: "message", id: "retained-user-message", parentId: null, timestamp, message: { role: "user", content: [{ type: "text", text: conversation[0] }], timestamp: now } },
-    { type: "message", id: "retained-assistant-message", parentId: "retained-user-message", timestamp, message: { role: "assistant", content: [{ type: "text", text: conversation[1] }], api: "openai-completions", provider: "openai", model: "gpt-4.1-mini", stopReason: "stop", usage: { input: 10, output: 8, cacheRead: 0, cacheWrite: 0, totalTokens: 18, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: now } },
+    { type: "session", version: 3, id, timestamp, cwd: workspace },
+    { type: "message", id: "retained-user-message", parentId: null, timestamp, message: { role: "user", content: [{ type: "text", text: messages[0] }], timestamp: now } },
+    { type: "message", id: "retained-assistant-message", parentId: "retained-user-message", timestamp, message: { role: "assistant", content: [{ type: "text", text: messages[1] }], api: "openai-completions", provider: "openai", model: "gpt-4.1-mini", stopReason: "stop", usage: { input: 10, output: 8, cacheRead: 0, cacheWrite: 0, totalTokens: 18, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: now } },
   ];
   fs.writeFileSync(transcript, entries.map(e => JSON.stringify(e)).join("\n") + "\n", { mode: 0o600 });
-  writeJson(path.join(state, "agents/main/agent/auth-profiles.json"), { version: 1, profiles: { "openai:migration-test": credential } });
+  writeJson(path.join(agentDir, "auth-profiles.json"), { version: 1, profiles: { [profileId]: account } });
 }
 
 module.exports = { createHome, addLegacy, addHistoryAndCredentials, writeJson, job, voicewake, workboard, sessionId, conversation, credential };

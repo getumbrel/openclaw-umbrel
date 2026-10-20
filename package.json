@@ -5,7 +5,8 @@
   "scripts": {
     "test": "node --test test/*.test.cjs",
     "test:integration": "node test/gateway-compatibility.cjs",
-    "test:migrations": "node test/migrations/run.cjs"
+    "test:migrations": "node test/migrations/run.cjs",
+    "test:upgrades": "node test/migrations/run.cjs --production"
   },
   "dependencies": {
     "node-pty": "^1.0.0",

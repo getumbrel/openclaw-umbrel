@@ -78,22 +78,67 @@ idempotent retries, and restoring a matching old runtime after a full snapshot
 that includes committed SQLite WAL data. Verification reads persisted records
 and checks database integrity; a successful Doctor exit alone is insufficient.
 
-This is the first migration implementation milestone. It does **not** enable an
-automatic production migration or approve the held app update. The matrix
-records expected refusals as well as working migration paths; passing the test
-suite does not mean every upgrade path works. In particular, a `2026.9.8`
-database containing configuration that requires `2026.9.5` still needs a
-compatible importer. The older Doctor cannot open that database safely.
-
-Before enabling the wrapper's startup migration, extend the fixtures to cover
-channel/plugin-specific state (including Matrix), queued messages and media,
-multiple agents and custom workspace paths, and storage/permission failures.
-Add and verify the production preflight, backup, migration journal, and recovery
-flow before the new Gateway or configuration reconciliation can touch old state.
-The CI workflow runs this evidence suite on native amd64 and arm64 runners.
+The Doctor matrix records expected refusals as well as working migration paths;
+passing that matrix alone does not establish release readiness.
 Upstream's [migration retention policy](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/gateway/doctor/config-migrations.md#retention-policy)
 and [intermediate-release guidance](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/install/updating.md#upgrading-very-old-versions)
 explain why a version bump alone is insufficient.
+
+### Automatic startup upgrade
+
+The wrapper blocks onboarding, configuration writes and Gateway startup while
+the upgrade worker runs. A kernel lock serializes workers. Before any migration,
+it snapshots the complete persistent home, including SQLite WAL/SHM files,
+credentials, encryption keys outside `.openclaw`, custom workspaces and Homebrew.
+It verifies file hashes, ownership, modes and symlink targets and fsyncs the
+snapshot and journal. It requires room for the snapshot and a recovery copy,
+plus 256 MiB. Paths outside the persistent home, special files and ownership
+that cannot be preserved cause a safe refusal.
+
+The image pins Doctor bridges `2026.9.5` and `2026.9.7` beside the candidate.
+Each bridge is admitted only when **all** discovered core and agent databases
+fit its declared schema limits. Older configuration can be transformed without
+opening those databases. Legacy OAuth JSON is repaired using upstream's bridge
+in a separate home containing only credential files and keys; the old package
+never receives the current databases. Original encrypted sidecars are retained.
+Maintenance and its descendants cannot create network sockets, and package
+downloads are deferred using upstream's update handoff. Normal CLI calls use
+the image's pinned OpenClaw, including when persistent npm storage has an older
+copy installed.
+
+Before activation, the worker checks credentials and saved environment values,
+rejects unsettled legacy data, refreshes the candidate plugin registry, checks
+SQLite integrity and requires upstream's isolated Gateway canary to reach real
+readiness. A failed check restores the verified original. If a command was
+interrupted or descendant shutdown is uncertain, the wrapper first restarts
+the container, then restores before any Gateway starts. Recovery leaves the app
+paused with an authenticated retry action. A committed receipt prevents repeat
+migration on ordinary restarts. Data written after activation is never rolled
+back automatically.
+
+Backups and private diagnostics remain under `/data/.umbrel-upgrades/<id>`;
+the active journal is `/data/.umbrel-upgrades/journal.json`. These contain user
+secrets and must not be published. Backups are retained rather than pruned
+automatically; available space is checked before each new transaction. Recovery
+keeps directory inodes so the second Homebrew bind mount remains usable.
+
+Run `npm run test:upgrades` for fault-injection tests, real-package upgrade
+fixtures and the full production image. The container tests cover initial
+upgrade, forced termination after SQLite changes, restoration, explicit retry,
+ordinary restart, fresh setup and Gateway authentication. Tests use synthetic
+credentials and isolated Docker networks; they do not prove live provider
+replies, channel delivery or encrypted Matrix room recovery. CI runs both
+evidence suites on native amd64 and arm64.
+
+**Release remains held for unsupported retained layouts.** In particular,
+upstream's [original Matrix layout](https://github.com/openclaw/openclaw/blob/v2026.9.7/docs/channels/matrix-migration.md#upgrading-from-openclaw-releases-older-than-20264)
+requires a 2026.6 bridge and a Gateway start, which this implementation refuses
+before touching data. Retired channel/plugin data needing 9.5 beside newer
+databases, retired Workboard data already on schema 20, and unresolved canonical
+OAuth references also stop safely rather than running an incompatible runtime.
+These refusals protect data; they do not satisfy a universal automatic upgrade.
+Keep the app update and wrapper PR in draft until the supported upgrade range
+and these remaining migration paths have been resolved and validated.
 
 ## License
 

@@ -5,8 +5,10 @@ const { randomUUID } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 
 const repo = path.resolve(__dirname, "../..");
+const production = process.argv.includes("--production");
 const current = fs.readFileSync(path.join(repo, "Dockerfile"), "utf8").match(/npm install -g openclaw@([^\s\\]+)/)?.[1];
 const target = process.env.OPENCLAW_MIGRATION_TARGET || current;
+if (production && target !== current) throw new Error("Production verification must use the exact version pinned in Dockerfile");
 if (!/^\d{4}\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(target || "")) throw new Error("An exact OpenClaw target version is required.");
 const tag = `openclaw-umbrel-migration-test:${target}`;
 const name = `openclaw-migration-test-${randomUUID()}`;
@@ -15,6 +17,7 @@ const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-migration-resu
 // from the runner UID, so make this new, dedicated results directory writable.
 fs.chmodSync(reportDir, 0o777);
 let started = false;
+if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `report-dir=${reportDir}\n`);
 function cleanup() {
   if (started) spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" });
   started = false;
@@ -31,9 +34,26 @@ let code = docker(["build", "--build-arg", `OPENCLAW_TARGET_VERSION=${target}`, 
 if (code === 0) {
   started = true;
   try {
-    code = docker(["run", "--rm", "--init", "--name", name, "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "-v", `${reportDir}:/results`, ...(process.env.MIGRATION_CASES ? ["-e", `MIGRATION_CASES=${process.env.MIGRATION_CASES}`] : []), tag]);
+    const base = ["run", "--rm", "--init", "--name", name, "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "-v", `${reportDir}:/results`];
+    if (production) {
+      code = docker([...base, tag, "npm", "--prefix", "/app", "test"]);
+      for (const id of ["legacy", "mixed-config", "workboard", "multiagent", "queued-media", "oauth-legacy", "oauth-schema20", "oauth-env-key", "oauth-missing-key", "oauth-tampered", "oauth-sqlite-reference", "workboard-schema20"]) {
+        if (code !== 0) break;
+        code = docker([...base, tag, "node", "/tests/upgrade-case.cjs", id]);
+      }
+    } else code = docker([...base, ...(process.env.MIGRATION_CASES ? ["-e", `MIGRATION_CASES=${process.env.MIGRATION_CASES}`] : []), tag]);
   } finally { cleanup(); }
 }
+if (production && code === 0) {
+  const image = `openclaw-umbrel:upgrade-${target}`;
+  code = docker(["build", "-t", image, "."]);
+  if (code === 0) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, "wrapper.cjs")], {
+      cwd: repo, stdio: "inherit", env: { ...process.env, UPGRADE_IMAGE: image, MIGRATION_REPORT_DIR: reportDir },
+    });
+    if (result.error) throw result.error;
+    code = result.status ?? 1;
+  }
+}
 console.log(`Migration evidence retained at ${reportDir}`);
-if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `report-dir=${reportDir}\n`);
 process.exitCode = code;

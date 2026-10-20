@@ -5,7 +5,13 @@ on:
     paths:
       - Dockerfile
       - server.cjs
-      - test/migrations/**
+      - onboard.cjs
+      - upgrade*
+      - migration-offline.c
+      - bin/**
+      - package*.json
+      - openclaw-context/**
+      - test/**
       - .github/workflows/migration-compatibility.yml
   workflow_dispatch:
 
@@ -19,7 +25,7 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,11 +34,18 @@ jobs:
       - name: Exercise pinned bridge and candidate packages
         id: migrations
         run: npm run test:migrations
+      - name: Install wrapper test dependencies
+        run: npm ci
+      - name: Verify production upgrade and container recovery
+        id: upgrades
+        run: npm run test:upgrades
       - name: Preserve compatibility matrix and Doctor logs
         if: always() && steps.migrations.outputs.report-dir != ''
         uses: actions/upload-artifact@v4
         with:
           name: migration-evidence-${{ matrix.runner }}
-          path: ${{ steps.migrations.outputs.report-dir }}
+          path: |
+            ${{ steps.migrations.outputs.report-dir }}
+            ${{ steps.upgrades.outputs.report-dir }}
           include-hidden-files: true
           retention-days: 14

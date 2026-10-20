@@ -26,6 +26,10 @@ const GATEWAY_CONFIG_EXIT_CODE = 78;
 const GATEWAY_STABLE_RUN_MS = 60_000;
 const GATEWAY_MAX_RESTART_DELAY_MS = 30_000;
 const MAINTENANCE_TIMEOUT_MS = 5 * 60_000;
+const OPENCLAW_CLI = "/usr/local/lib/node_modules/openclaw/openclaw.mjs";
+const UPGRADE_TOKEN = crypto.randomBytes(24).toString("hex");
+let upgradeState = "ready";
+let upgradeProcess = null;
 
 // Keep OpenClaw and the wrapper on the same state root even when an older
 // deployment still supplies the wrapper-specific OPENCLAW_DATA_DIR override.
@@ -59,8 +63,12 @@ function getOpenClawEnv() {
     OPENCLAW_SERVICE_REPAIR_POLICY: "external",
     OPENCLAW_SUPERVISOR_MODE: "external",
     OPENCLAW_NO_RESPAWN: "1",
+    UMBREL_OPENCLAW_CLI: OPENCLAW_CLI,
   };
   // Trusted-proxy mode rejects a shared token, including inherited overrides.
+  // Persisted global npm packages may include an older OpenClaw. All wrapper
+  // and agent CLI invocations must use the runtime belonging to this image.
+  env.PATH = `/app/bin:${env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
   delete env.OPENCLAW_GATEWAY_TOKEN;
   const password = resolveGatewaySecretValue(readConfig()?.gateway?.auth?.password, env);
   if (password) env.OPENCLAW_GATEWAY_PASSWORD = password;
@@ -511,7 +519,7 @@ function reconcileConfig() {
 // so running Doctor on every ordinary restart is redundant and slow.
 async function runDoctor() {
   try {
-    await execFileAsync("openclaw", ["doctor", "--repair", "--yes", "--non-interactive"], {
+    await execFileAsync(process.execPath, [OPENCLAW_CLI, "doctor", "--repair", "--yes", "--non-interactive"], {
       env: getOpenClawEnv(),
       timeout: MAINTENANCE_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
@@ -530,8 +538,8 @@ async function runDoctor() {
 async function refreshPluginRegistry() {
   try {
     await execFileAsync(
-      "openclaw",
-      ["plugins", "registry", "--refresh", "--json"],
+      process.execPath,
+      [OPENCLAW_CLI, "plugins", "registry", "--refresh", "--json"],
       {
         env: getOpenClawEnv(),
         timeout: MAINTENANCE_TIMEOUT_MS,
@@ -679,8 +687,8 @@ function spawnGateway() {
   gatewayFailure = null;
   console.log("Starting OpenClaw gateway...");
   const child = spawn(
-    "openclaw",
-    ["gateway", "--port", OPENCLAW_PORT.toString()],
+    process.execPath,
+    [OPENCLAW_CLI, "gateway", "--port", OPENCLAW_PORT.toString()],
     {
       stdio: "inherit",
       env: getOpenClawEnv(),
@@ -717,6 +725,7 @@ function startOpenclaw() {
   // Guard against async reconciliation/recovery and duplicate request/restart triggers.
   if (
     shuttingDown ||
+    upgradeState !== "ready" ||
     openclawProcess ||
     openclawStarting ||
     gatewayFailure?.code === GATEWAY_CONFIG_EXIT_CODE ||
@@ -947,6 +956,27 @@ const server = http.createServer((req, res) => {
     res.end("Forbidden");
     return;
   }
+  if (upgradeState !== "ready") {
+    if (req.method === "POST" && req.url === "/api/upgrade/retry") {
+      if (req.headers["x-umbrel-upgrade-token"] !== UPGRADE_TOKEN) {
+        res.writeHead(403); res.end("Forbidden"); return;
+      }
+      if (upgradeState !== "failed") { res.writeHead(409); res.end("Upgrade already running"); return; }
+      upgradeState = "checking";
+      res.writeHead(202); res.end();
+      finishStartup(true).catch(failStartup);
+      return;
+    }
+    const failed = upgradeState === "failed";
+    res.writeHead(503, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "5" });
+    res.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>OpenClaw update</title>
+      <style>body{background:#101014;color:#eee;font:16px system-ui;max-width:32rem;margin:16vh auto;padding:2rem;line-height:1.6}button{font:inherit;padding:.65rem 1.2rem;border:0;border-radius:.5rem;cursor:pointer}</style></head><body>
+      <h1>${failed ? "OpenClaw needs attention" : "Preparing your OpenClaw update"}</h1>
+      <p>${failed ? "The update could not be completed safely. Your original data has been retained and OpenClaw is paused. Check the app logs for the reason before trying again." : "Your data is being backed up, migrated, and checked. This can take several minutes. OpenClaw will open automatically when it is ready."}</p>
+      ${failed ? `<button onclick="this.disabled=true;fetch('/api/upgrade/retry',{method:'POST',headers:{'x-umbrel-upgrade-token':'${UPGRADE_TOKEN}'}}).then(()=>location.reload())">Try update again</button>` : "<script>setTimeout(()=>location.reload(),5000)</script>"}
+      </body></html>`);
+    return;
+  }
   // Serve static assets for setup UI
   if (req.url === "/logo.webp") {
     res.writeHead(200, { "Content-Type": "image/webp", "Cache-Control": "public, max-age=86400" });
@@ -1100,6 +1130,10 @@ wss.on("connection", (ws) => {
 
 // Handle WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
+  if (upgradeState !== "ready") {
+    socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+    return;
+  }
   if (!isAllowedBrowserRequest(req)) {
     socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     return;
@@ -1139,12 +1173,37 @@ server.on("upgrade", (req, socket, head) => {
   handleUpgrade(req, socket, head);
 });
 
-async function main() {
+function checkUpgrade(retry) {
+  const { UpgradeStorage } = require("./upgrade-storage.cjs");
+  const storage = new UpgradeStorage(process.env.HOME, CONFIG_DIR);
+  return new Promise((resolve, reject) => {
+    const child = spawn("flock", ["--nonblock", "--no-fork", path.join(storage.root, "process.lock"), process.execPath, path.join(__dirname, "upgrade-worker.cjs"), ...(retry ? ["--retry"] : [])], {
+      stdio: "inherit", detached: true, env: { ...process.env, OPENCLAW_STATE_DIR: CONFIG_DIR },
+    });
+    upgradeProcess = child;
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      upgradeProcess = null;
+      if (shuttingDown) return resolve();
+      if (code === 86 || signal) {
+        console.error("Restarting the container before upgrade recovery");
+        process.exit(1);
+      }
+      if (code !== 0) reject(new Error("OpenClaw upgrade checks did not complete"));
+      else resolve();
+    });
+  });
+}
+
+async function finishStartup(retry = false) {
+  await checkUpgrade(retry);
+  if (shuttingDown) return;
   // Finish persistent-home initialization before creating OpenClaw's state
   // directory. This removes the former startup race that could skip skeleton
   // content depending on filesystem timing.
   await initializeHome();
   ensureConfigDir();
+  upgradeState = "ready";
 
   if (isConfigured()) {
     console.log("OpenClaw is configured, starting gateway...");
@@ -1153,9 +1212,17 @@ async function main() {
     console.log("OpenClaw not configured, showing setup UI...");
   }
 
+}
+function failStartup(error) {
+  upgradeState = "failed";
+  console.error("OpenClaw startup paused:", error.message);
+}
+async function main() {
+  upgradeState = "checking";
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Setup server listening on port ${PORT}`);
   });
+  await finishStartup().catch(failStartup);
 }
 
 // Graceful shutdown: Docker sends SIGTERM on stop/restart/update.
@@ -1164,6 +1231,9 @@ async function main() {
 function shutdown() {
   console.log("Received SIGTERM, shutting down...");
   shuttingDown = true;
+  if (upgradeProcess?.pid) {
+    try { process.kill(-upgradeProcess.pid, "SIGTERM"); } catch {}
+  }
   if (gatewayRestartTimer) {
     clearTimeout(gatewayRestartTimer);
     gatewayRestartTimer = null;
