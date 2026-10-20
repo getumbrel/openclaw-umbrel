@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "test": "node --test test/*.test.cjs",
-    "test:integration": "node test/gateway-compatibility.cjs"
+    "test:integration": "node test/gateway-compatibility.cjs",
+    "test:migrations": "node test/migrations/run.cjs"
   },
   "dependencies": {
     "node-pty": "^1.0.0",

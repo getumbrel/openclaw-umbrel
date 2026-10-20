@@ -53,6 +53,48 @@ These checks enroll a test browser device and verify dashboard/bootstrap access,
 device-less and signed-device handshakes, admin RPC access, stale credentials,
 and cross-origin request rejection. They do not call an AI provider.
 
+### Migration compatibility lab
+
+Run `npm run test:migrations` with Docker available to test the OpenClaw version
+pinned in the production Dockerfile. To investigate another exact release:
+
+```sh
+OPENCLAW_MIGRATION_TARGET=2026.10.5 npm run test:migrations
+```
+
+The lab builds a separate image containing the candidate and pinned `2026.9.5`,
+`2026.9.7`, and `2026.9.8` packages. It runs the real Doctor CLI with networking
+disabled against disposable synthetic homes. It never mounts app data or uses
+real credentials. The command prints the location of `matrix.json`, per-step
+logs, and copies of failed fixtures. The image is retained for subsequent runs;
+the test container is removed. Set `MIGRATION_CASES` to a comma-separated list
+of case IDs from `test/migrations/matrix.cjs` to repeat a specific case.
+
+Coverage includes legacy cron JSON, Voice Wake settings, retired configuration,
+Workboard cards/boards/subscriptions/attachment bytes, conversation messages,
+saved provider credentials, and workspace files. Tests also cover retained
+legacy data beside a `2026.9.8` database, interruption after a cron import commits,
+idempotent retries, and restoring a matching old runtime after a full snapshot
+that includes committed SQLite WAL data. Verification reads persisted records
+and checks database integrity; a successful Doctor exit alone is insufficient.
+
+This is the first migration implementation milestone. It does **not** enable an
+automatic production migration or approve the held app update. The matrix
+records expected refusals as well as working migration paths; passing the test
+suite does not mean every upgrade path works. In particular, a `2026.9.8`
+database containing configuration that requires `2026.9.5` still needs a
+compatible importer. The older Doctor cannot open that database safely.
+
+Before enabling the wrapper's startup migration, extend the fixtures to cover
+channel/plugin-specific state (including Matrix), queued messages and media,
+multiple agents and custom workspace paths, and storage/permission failures.
+Add and verify the production preflight, backup, migration journal, and recovery
+flow before the new Gateway or configuration reconciliation can touch old state.
+The CI workflow runs this evidence suite on native amd64 and arm64 runners.
+Upstream's [migration retention policy](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/gateway/doctor/config-migrations.md#retention-policy)
+and [intermediate-release guidance](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/install/updating.md#upgrading-very-old-versions)
+explain why a version bump alone is insufficient.
+
 ## License
 
 MIT

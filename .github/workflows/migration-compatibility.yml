@@ -1,0 +1,37 @@
+name: OpenClaw migration compatibility
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - server.cjs
+      - test/migrations/**
+      - .github/workflows/migration-compatibility.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+      - name: Exercise pinned bridge and candidate packages
+        id: migrations
+        run: npm run test:migrations
+      - name: Preserve compatibility matrix and Doctor logs
+        if: always() && steps.migrations.outputs.report-dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-evidence-${{ matrix.runner }}
+          path: ${{ steps.migrations.outputs.report-dir }}
+          retention-days: 14
