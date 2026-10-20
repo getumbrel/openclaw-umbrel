@@ -4,7 +4,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { zstdDecompressSync } = require("node:zlib");
 const { createHome, addLegacy, addHistoryAndCredentials, job, voicewake, sessionId, conversation, credential } = require("./fixtures.cjs");
-const { packageRoot, run, doctor, success, database, hash, preserved, schemas, readTables } = require("./lab.cjs");
+const { packageRoot, run, doctor, success, database, hash, preserved, schemas, readTables, exportFixture } = require("./lab.cjs");
 
 const outputDir = process.env.MIGRATION_REPORT_DIR || "/results";
 fs.mkdirSync(outputDir, { recursive: true });
@@ -198,9 +198,7 @@ async function main() {
         // These homes contain only synthetic data. Keep failed fixtures for
         // diagnosis after the disposable container has been removed.
         try {
-          fs.cpSync(home, path.join(logs, "failed-home"), {
-            recursive: true, filter: source => !fs.lstatSync(source).isSocket(),
-          });
+          exportFixture(home, path.join(logs, "failed-home"));
         } catch (copyError) { row.fixtureCopyError = copyError.message; }
       }
       report.cases.push(row);

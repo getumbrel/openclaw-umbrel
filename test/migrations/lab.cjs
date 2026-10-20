@@ -24,7 +24,9 @@ function environment(home, version = "target") {
 }
 
 async function run(args, home, log, { timeout = 180000, onOutput, version = "target" } = {}) {
-  const fd = fs.openSync(log, "w", 0o600);
+  // Synthetic logs are exported through a bind mount. GitHub's runner UID can
+  // differ from the container UID, so the artifact uploader must be able to read.
+  const fd = fs.openSync(log, "w", 0o644);
   const started = Date.now();
   let output = "", timedOut = false, interrupted = false;
   const child = spawn(process.execPath, args, { env: environment(home, version), detached: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -98,4 +100,18 @@ function readTables(state, table, query) {
   return results;
 }
 
-module.exports = { packageRoot, environment, run, doctor, success, database, hash, preserved, schemas, readTables };
+function exportFixture(home, destination) {
+  fs.cpSync(home, destination, { recursive: true, filter: source => !fs.lstatSync(source).isSocket() });
+  function visit(file) {
+    const stat = fs.lstatSync(file);
+    if (stat.isDirectory()) {
+      fs.chmodSync(file, 0o755);
+      for (const name of fs.readdirSync(file)) visit(path.join(file, name));
+    } else if (stat.isFile()) fs.chmodSync(file, 0o644);
+  }
+  // Only the synthetic failure copy is made readable, never the working home.
+  // Do not follow symlinks when changing permissions.
+  visit(destination);
+}
+
+module.exports = { packageRoot, environment, run, doctor, success, database, hash, preserved, schemas, readTables, exportFixture };
