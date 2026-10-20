@@ -55,5 +55,16 @@ if (production && code === 0) {
     code = result.status ?? 1;
   }
 }
+if (production) {
+  const cases = fs.readdirSync(reportDir).filter(name => name.startsWith("upgrade-")).flatMap(name => {
+    const file = path.join(reportDir, name, "result.json");
+    return fs.existsSync(file) ? [JSON.parse(fs.readFileSync(file, "utf8"))] : [];
+  });
+  fs.writeFileSync(path.join(reportDir, "upgrade-matrix.json"), JSON.stringify({
+    target, architecture: process.arch, passed: code === 0 && cases.length === 12, cases,
+    productionReady: false,
+    releaseBlockers: ["Original Matrix layout needs a 2026.6 bridge and Gateway recovery", "Older channel/plugin data beside newer schemas needs compatible importers", "Canonical SQLite-only unresolved OAuth references and schema-20 legacy Workboard are refused", "Live provider/channel delivery and encrypted Matrix recovery remain unverified"],
+  }, null, 2));
+}
 console.log(`Migration evidence retained at ${reportDir}`);
 process.exitCode = code;

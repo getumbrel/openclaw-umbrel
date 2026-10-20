@@ -128,3 +128,18 @@ test("reconciliation cannot discard a saved environment credential", async () =>
   await assert.rejects(ensureUpgrade({ ...f.options, reconcile: () => fs.writeFileSync(path.join(f.stateDir, ".env"), "OPENCLAW_GATEWAY_PASSWORD=replaced\n") }), /Saved environment setting did not survive/);
   sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), f.before);
 });
+test("data cannot use the metadata directory excluded from its own snapshot", async () => {
+  const f = fixture("reserved-directory");
+  fs.mkdirSync(path.join(f.home, DIRECTORY));
+  fs.symlinkSync(path.join(f.home, DIRECTORY), path.join(f.stateDir, "workspace"));
+  await assert.rejects(ensureUpgrade(f.options), /outside the recoverable/);
+  assert.equal(f.calls.length, 0);
+});
+test("persisted alternate state selectors cannot be reloaded behind the backup boundary", async () => {
+  const f = fixture("env-selector");
+  fs.appendFileSync(path.join(f.stateDir, ".env"), `OPENCLAW_AGENT_DIR=${root}/untracked-agent\n`);
+  const before = inventory(f.home);
+  await assert.rejects(ensureUpgrade(f.options), /alternate state selector/);
+  assert.equal(f.calls.length, 0);
+  sameInventory(inventory(f.home, { exclude: [DIRECTORY] }), before);
+});

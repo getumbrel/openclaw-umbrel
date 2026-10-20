@@ -5,7 +5,7 @@ const { DatabaseSync } = require("node:sqlite");
 const { createRequire } = require("node:module");
 const { parseEnv } = require("node:util");
 const { randomUUID } = require("node:crypto");
-const { UpgradeStorage, inside, writeJson, processIdentity } = require("./upgrade-storage.cjs");
+const { UpgradeStorage, DIRECTORY, inside, writeJson, processIdentity } = require("./upgrade-storage.cjs");
 const { agentDirectories, readProfiles, assertCredentialPreservation } = require("./upgrade-auth.cjs");
 
 const TARGET_ROOT = "/usr/local/lib/node_modules/openclaw";
@@ -104,7 +104,7 @@ function inspectPaths(home, stateDir) {
       const file = path.join(directory, item.name);
       if (item.isSymbolicLink()) {
         const target = fs.realpathSync(file);
-        if (!inside(home, target)) throw new Error(`State links outside the recoverable persistent home: ${path.relative(stateDir, file)}`);
+        if (!inside(home, target) || inside(path.join(home, DIRECTORY), target)) throw new Error(`State links outside the recoverable persistent home: ${path.relative(stateDir, file)}`);
       } else if (item.isDirectory()) visit(file);
     }
   }
@@ -122,7 +122,7 @@ function inspectConfigPaths(home, stateDir, targetRoot) {
     const file = path.resolve(relativeTo, expanded);
     let existing = file;
     while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
-    if (!inside(home, file) || !inside(home, fs.realpathSync(existing))) throw new Error(`Configured data path is outside the recoverable persistent home: ${label}`);
+    if (!inside(home, file) || !inside(home, fs.realpathSync(existing)) || inside(path.join(home, DIRECTORY), file) || inside(path.join(home, DIRECTORY), fs.realpathSync(existing))) throw new Error(`Configured data path is outside the recoverable persistent home: ${label}`);
     return file;
   }
   function inspect(file) {
@@ -237,11 +237,18 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
       if (!env[key]) continue;
       let existing = path.resolve(env[key]);
       while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
-      if (!path.isAbsolute(env[key]) || !inside(home, env[key]) || !inside(home, fs.realpathSync(existing))) throw new Error(`Environment data path is outside the recoverable persistent home: ${key}`);
+      if (!path.isAbsolute(env[key]) || !inside(home, env[key]) || !inside(home, fs.realpathSync(existing)) || inside(path.join(home, DIRECTORY), env[key]) || inside(path.join(home, DIRECTORY), fs.realpathSync(existing))) throw new Error(`Environment data path is outside the recoverable persistent home: ${key}`);
+    }
+    for (const key of ["OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_AGENT_DIR", "PI_CODING_AGENT_DIR"]) {
+      if (env[key]) throw new Error(`An alternate state selector requires inspection before migration: ${key}`);
+      // An empty override also prevents upstream's .env loader from restoring
+      // a selector that was removed from the maintenance environment.
+      env[key] = "";
     }
     // Explicit state selectors and auth overrides inherited from another CLI
     // must not redirect maintenance outside this transaction.
-    for (const key of ["NODE_OPTIONS", "OPENCLAW_HOME", "OPENCLAW_PROFILE", "OPENCLAW_AGENT_DIR", "PI_CODING_AGENT_DIR", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_GATEWAY_PASSWORD", "OPENCLAW_UPDATE_IN_PROGRESS", "OPENCLAW_UPDATE_RUN_ID"]) delete env[key];
+    env.NODE_OPTIONS = "";
+    for (const key of ["OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_GATEWAY_PASSWORD", "OPENCLAW_UPDATE_IN_PROGRESS", "OPENCLAW_UPDATE_RUN_ID"]) delete env[key];
     const parseConfig = () => createRequire(path.join(targetRoot, "package.json"))("json5").parse(fs.readFileSync(configFile, "utf8"));
     const schemas = schemaInventory(stateDir, parseConfig(), home);
     if (!compatible(schemas, target)) throw new Error("The installed image is older than the retained databases; a runtime downgrade is not safe");

@@ -49,8 +49,11 @@ async function main() {
     const config = JSON.parse(fs.readFileSync(configFile));
     if (id === "workboard") config.plugins = { enabled: true, allow: ["workboard"], entries: { workboard: { enabled: true } } };
     fs.writeFileSync(configFile, JSON.stringify(config));
-    success(await run([path.join(__dirname, "workboard.mjs"), packageRoot("2026.9.7"), "seed"], home, path.join(results, "seed.log"), { version: "2026.9.7" }), "Workboard seed");
-    if (id === "workboard-schema20") success(await doctor("target", home, path.join(results, "baseline.log")), "schema 20 with retained Workboard records");
+    const seedVersion = id === "workboard-schema20" ? "target" : "2026.9.7";
+    // For the partial-update case, use the current generic plugin-state SDK to
+    // retain the historical payload shapes beside a real current-schema DB.
+    success(await run([path.join(__dirname, "workboard.mjs"), packageRoot(seedVersion), "seed"], home, path.join(results, "seed.log"), { version: seedVersion }), "Workboard seed");
+    if (id === "workboard-schema20") assert.equal(schemaInventory(stateDir).state, 20);
   } else if (id === "multiagent") {
     const workspace = path.join(home, "second-workspace"), agentDir = path.join(home, "second-agent");
     fs.mkdirSync(workspace); fs.writeFileSync(path.join(workspace, "SOUL.md"), "Second agent's retained instructions.\n");
@@ -85,8 +88,9 @@ async function main() {
       // PID-namespace replacement; here the identity is explicitly injected.
       if (["oauth-missing-key", "oauth-tampered"].includes(id)) await assert.rejects(ensureUpgrade({ home, stateDir, containerIdentity: () => "replacement-fixture-container" }), /rolled back/);
       sameInventory(inventory(home, { exclude: [DIRECTORY] }), before);
-      fs.writeFileSync(path.join(results, "result.json"), JSON.stringify({ id, passed: true, disposition: "refused-and-restored" }, null, 2));
-      console.log(`PASS refused and restored: ${id}`);
+      const journal = JSON.parse(fs.readFileSync(path.join(home, DIRECTORY, "journal.json")));
+      fs.writeFileSync(path.join(results, "result.json"), JSON.stringify({ id, passed: true, disposition: "refused", originalDataVerified: true, restored: Boolean(journal.restored) }, null, 2));
+      console.log(`PASS safe refusal with original data verified: ${id}`);
       return;
     }
     const result = await ensureUpgrade({ home, stateDir, reconcile: reconcileConfig, progress: message => console.log(message) });
