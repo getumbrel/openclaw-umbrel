@@ -34,4 +34,5 @@ jobs:
         with:
           name: migration-evidence-${{ matrix.runner }}
           path: ${{ steps.migrations.outputs.report-dir }}
+          include-hidden-files: true
           retention-days: 14
