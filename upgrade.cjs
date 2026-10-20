@@ -202,6 +202,7 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
   try {
     const target = packageInfo(targetRoot);
     journal = storage.read();
+    if (journal?.phase === "snapshotting" && !journal.snapshotReady) storage.discardIncomplete(journal);
     if (journal && ["migrating", "validating", "restoring"].includes(journal.phase)) {
       if (journal.containerIdentity === containerIdentity()) throw Object.assign(new Error("Container restart is required before recovering this interrupted upgrade"), { cleanupUncertain: true });
       progress("Restoring the verified pre-upgrade snapshot");

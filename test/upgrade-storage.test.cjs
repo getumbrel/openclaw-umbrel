@@ -93,6 +93,21 @@ test("a live IPC file prevents an incomplete snapshot from being accepted", () =
   assert.throws(() => storage.snapshot("2026.10.5"), /special file/);
   assert.equal(storage.read(), null);
 });
+test("a failed partial copy is removed so it cannot exhaust the next retry's space", () => {
+  const { home, storage } = fixture("partial-copy");
+  const before = inventory(home, { exclude: [DIRECTORY] });
+  const copy = fs.cpSync;
+  try {
+    fs.cpSync = (...args) => { copy(...args); throw Object.assign(new Error("simulated disk exhaustion"), { code: "ENOSPC" }); };
+    assert.throws(() => storage.snapshot("2026.10.5"), /disk exhaustion/);
+  } finally { fs.cpSync = copy; }
+  const journal = storage.read();
+  assert.equal(journal.phase, "failed");
+  assert.equal(journal.snapshotReady, false);
+  assert.equal(fs.existsSync(storage.directory(journal)), false);
+  sameInventory(inventory(home, { exclude: [DIRECTORY] }), before);
+  assert.equal(storage.snapshot("2026.10.5").snapshotReady, true);
+});
 test("a second live owner cannot take the migration lock", () => {
   const { storage } = fixture("locking");
   const release = storage.lock();

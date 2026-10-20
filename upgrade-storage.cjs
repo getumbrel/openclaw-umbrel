@@ -82,6 +82,19 @@ function syncTree(root) {
   }
   syncDirectory(root);
 }
+function removeIncompleteCopy(directory) {
+  // Only used on this transaction's unverified private copy, never user files
+  // or a verified original. Restore copied read-only directory modes enough to
+  // remove the partial tree without following symlinks.
+  if (!fs.existsSync(directory)) return;
+  function writable(file) {
+    if (!fs.lstatSync(file).isDirectory()) return;
+    fs.chmodSync(file, 0o700);
+    for (const name of fs.readdirSync(file)) writable(path.join(file, name));
+  }
+  writable(directory);
+  fs.rmSync(directory, { recursive: true, force: true });
+}
 function processIdentity(pid) {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -140,7 +153,7 @@ class UpgradeStorage {
   read() {
     if (!fs.existsSync(this.journalPath)) return null;
     const journal = JSON.parse(fs.readFileSync(this.journalPath, "utf8"));
-    if (journal.home !== this.home || journal.stateDir !== this.stateDir || !/^[a-f0-9-]{36}$/.test(journal.id) || !["snapshotting", "prepared", "migrating", "validating", "restoring", "failed", "committed"].includes(journal.phase)) {
+    if (journal.format !== 1 || journal.home !== this.home || journal.stateDir !== this.stateDir || !/^[a-f0-9-]{36}$/.test(journal.id) || !["snapshotting", "prepared", "migrating", "validating", "restoring", "failed", "committed"].includes(journal.phase)) {
       throw new Error("Invalid upgrade journal; retained data requires inspection");
     }
     return journal;
@@ -150,22 +163,35 @@ class UpgradeStorage {
     writeJson(this.journalPath, journal);
   }
   directory(journal) { return path.join(this.root, journal.id); }
+  discardIncomplete(journal) {
+    if (journal.snapshotReady || !["snapshotting", "failed"].includes(journal.phase)) throw new Error("Refusing to discard a verified or active upgrade snapshot");
+    this.write(journal, "failed", { restored: false });
+    removeIncompleteCopy(this.directory(journal));
+    syncDirectory(this.root);
+  }
   snapshot(target) {
     const entries = inventory(this.home, { exclude: [DIRECTORY] });
     const bytes = entries.reduce((total, entry) => total + (entry.size || 0), 0);
     // Keep room for both the retained snapshot and a verified restoration copy.
     if (this.availableBytes() < bytes * 2 + this.reserveBytes) throw new Error("Not enough free space for a verified upgrade backup and recovery copy");
-    const journal = { id: crypto.randomUUID(), home: this.home, stateDir: this.stateDir, target, createdAt: new Date().toISOString(), snapshotReady: false };
+    const journal = { format: 1, id: crypto.randomUUID(), home: this.home, stateDir: this.stateDir, target, createdAt: new Date().toISOString(), snapshotReady: false };
     fs.mkdirSync(this.directory(journal), { mode: 0o700 });
     this.write(journal, "snapshotting");
     const snapshot = path.join(this.directory(journal), "original");
-    copyTree(this.home, snapshot, { exclude: [DIRECTORY] });
-    sameInventory(inventory(snapshot), entries);
-    sameInventory(inventory(this.home, { exclude: [DIRECTORY] }), entries);
-    syncTree(snapshot);
-    writeJson(path.join(this.directory(journal), "manifest.json"), entries);
-    this.write(journal, "prepared", { snapshotReady: true, bytes });
-    return journal;
+    try {
+      copyTree(this.home, snapshot, { exclude: [DIRECTORY] });
+      sameInventory(inventory(snapshot), entries);
+      sameInventory(inventory(this.home, { exclude: [DIRECTORY] }), entries);
+      syncTree(snapshot);
+      writeJson(path.join(this.directory(journal), "manifest.json"), entries);
+      this.write(journal, "prepared", { snapshotReady: true, bytes });
+      return journal;
+    } catch (error) {
+      // An incomplete copy must not consume the space needed for a later retry.
+      // A snapshot that has reached verification is always retained.
+      if (!journal.snapshotReady) this.discardIncomplete(journal);
+      throw error;
+    }
   }
   restore(journal) {
     if (!journal.snapshotReady) throw new Error("No verified snapshot is available; refusing restoration");
