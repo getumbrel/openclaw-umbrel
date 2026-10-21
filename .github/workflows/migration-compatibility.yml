@@ -25,7 +25,7 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,6 +39,9 @@ jobs:
       - name: Verify production upgrade and container recovery
         id: upgrades
         run: npm run test:upgrades
+      - name: Upgrade data prepared by publicly shipped releases
+        id: shipped
+        run: npm run test:shipped-upgrades
       - name: Preserve compatibility matrix and Doctor logs
         if: always() && steps.migrations.outputs.report-dir != ''
         uses: actions/upload-artifact@v4
@@ -47,5 +50,6 @@ jobs:
           path: |
             ${{ steps.migrations.outputs.report-dir }}
             ${{ steps.upgrades.outputs.report-dir }}
+            ${{ steps.shipped.outputs.report-dir }}
           include-hidden-files: true
           retention-days: 14

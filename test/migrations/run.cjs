@@ -6,6 +6,7 @@ const { spawnSync } = require("node:child_process");
 
 const repo = path.resolve(__dirname, "../..");
 const production = process.argv.includes("--production");
+const upgradeCases = ["legacy", "mixed-config", "workboard", "multiagent", "queued-media", "oauth-legacy", "oauth-schema20", "oauth-env-key", "oauth-missing-key", "oauth-tampered", "oauth-sqlite-shipped", "oauth-sqlite-reference", "oauth-sqlite-missing-key", "oauth-sqlite-multiagent", "workboard-schema20", "matrix-retained-9.8", "telegram-retained-9.8", "telegram-conflict-9.8"];
 const current = fs.readFileSync(path.join(repo, "Dockerfile"), "utf8").match(/npm install -g openclaw@([^\s\\]+)/)?.[1];
 const target = process.env.OPENCLAW_MIGRATION_TARGET || current;
 if (production && target !== current) throw new Error("Production verification must use the exact version pinned in Dockerfile");
@@ -37,7 +38,7 @@ if (code === 0) {
     const base = ["run", "--rm", "--init", "--name", name, "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "-v", `${reportDir}:/results`];
     if (production) {
       code = docker([...base, tag, "npm", "--prefix", "/app", "test"]);
-      for (const id of ["legacy", "mixed-config", "workboard", "multiagent", "queued-media", "oauth-legacy", "oauth-schema20", "oauth-env-key", "oauth-missing-key", "oauth-tampered", "oauth-sqlite-reference", "workboard-schema20"]) {
+      for (const id of upgradeCases) {
         if (code !== 0) break;
         code = docker([...base, tag, "node", "/tests/upgrade-case.cjs", id]);
       }
@@ -61,9 +62,12 @@ if (production) {
     return fs.existsSync(file) ? [JSON.parse(fs.readFileSync(file, "utf8"))] : [];
   });
   fs.writeFileSync(path.join(reportDir, "upgrade-matrix.json"), JSON.stringify({
-    target, architecture: process.arch, passed: code === 0 && cases.length === 12, cases,
+    target, architecture: process.arch, passed: code === 0 && cases.length === upgradeCases.length, cases,
     productionReady: false,
-    releaseBlockers: ["Original Matrix layout needs 2026.6 then 2026.9.5 with channel starts; retired account sidecars also need a 9.5 Matrix start", "Older channel/plugin data beside newer schemas needs compatible importers", "Canonical SQLite-only unresolved OAuth references and schema-20 legacy Workboard are refused", "Live provider/channel delivery and encrypted Matrix recovery remain unverified"],
+    publicHistory: { commit: require("./shipped-history.json").auditedThrough, latest: "2026.9.8", latestStateSchema: 19 },
+    recoveryOnlyCases: ["oauth-schema20", "oauth-sqlite-reference", "workboard-schema20"],
+    releaseBlockers: ["Original and retired account-scoped Matrix layouts remain possible from public releases and require a verified channel migration", "Other retired channel/plugin formats need provenance and preservation checks; Telegram offset import is covered separately", "Representative provider/channel operation and encrypted Matrix recovery remain unverified"],
+    scopeNotes: ["Schema-20 recovery scenarios are not ordinary starting states produced by public releases", "Synthetic retained-layout fixtures establish behavior and possible routes, not affected-user counts"],
   }, null, 2));
 }
 console.log(`Migration evidence retained at ${reportDir}`);

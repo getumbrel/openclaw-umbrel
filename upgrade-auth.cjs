@@ -18,6 +18,44 @@ function legacyAuthFiles(stateDir, config) {
   for (const directory of agentDirectories(stateDir, config)) files.add(path.join(directory, "auth-profiles.json"));
   return [...files].filter(file => fs.existsSync(file));
 }
+// Read opaque credential stores without loading an old runtime against the
+// installed schema. The primary store moved from agent SQLite to shared SQLite
+// before the last public Umbrel release; either can retain an OAuth reference.
+function canonicalAuthStores(stateDir, databases) {
+  const stores = [];
+  for (const info of databases) {
+    if (!info.kind) continue;
+    const file = path.join(stateDir, info.path);
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      const tables = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name));
+      if (tables.has("config_machine_state")) for (const row of db.prepare("SELECT value_json AS json FROM config_machine_state WHERE state_key = 'authProfiles.store'").all()) {
+        stores.push({ kind: "shared", file, key: "authProfiles.store", json: row.json, raw: JSON.parse(row.json) });
+      }
+      if (tables.has("auth_profile_store")) for (const row of db.prepare("SELECT store_key, store_json AS json FROM auth_profile_store").all()) {
+        stores.push({ kind: "agent", file, key: row.store_key, json: row.json, raw: JSON.parse(row.json) });
+      }
+    } finally { db.close(); }
+  }
+  return stores;
+}
+function replaceCanonicalAuthStore(store, repaired) {
+  if (!["shared", "agent"].includes(store.kind)) throw new Error("Unknown canonical credential store");
+  const db = new DatabaseSync(store.file);
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    const sql = store.kind === "shared"
+      ? "UPDATE config_machine_state SET value_json = ? WHERE state_key = ? AND value_json = ?"
+      : "UPDATE auth_profile_store SET store_json = ? WHERE store_key = ? AND store_json = ?";
+    // Keep all store metadata and timestamps; only the verified credential JSON
+    // changes. A competing writer must never be silently overwritten.
+    if (db.prepare(sql).run(JSON.stringify(repaired), store.key, store.json).changes !== 1) throw new Error("Canonical credentials changed during repair; refusing to overwrite them");
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw error;
+  } finally { db.close(); }
+}
 function readProfiles(stateDir, config, databases, { canonicalOnly = false } = {}) {
   const canonical = [], legacy = [];
   const sharedDirectories = new Set([stateDir, path.join(stateDir, "agent"), path.join(stateDir, "agents/main/agent")].map(directory => fs.existsSync(directory) ? fs.realpathSync(directory) : directory));
@@ -48,7 +86,7 @@ function readProfiles(stateDir, config, databases, { canonicalOnly = false } = {
   }
   return [...combined.values()];
 }
-function assertCredentialPreservation(before, after) {
+function assertCredentialPreservation(before, after, { profileIdMap = new Map(), requireCanonical = false } = {}) {
   const provider = value => value === "openai-codex" ? "openai" : value;
   const profileId = value => value.replace(/^openai-codex:/, "openai:");
   for (const { id, scope, credential } of before) {
@@ -56,9 +94,16 @@ function assertCredentialPreservation(before, after) {
     const fields = ["type", "key", "keyRef", "token", "tokenRef", "access", "refresh", "idToken", "expires", "accountId", "email"]
       .filter(field => credential[field] !== undefined);
     if (!fields.some(field => ["key", "keyRef", "token", "tokenRef", "access", "refresh"].includes(field))) continue;
-    if (!after.some(candidate => candidate.scope === scope && profileId(candidate.id) === profileId(id) && provider(candidate.credential.provider) === provider(credential.provider) && fields.every(field => isDeepStrictEqual(credential[field], candidate.credential[field])))) {
+    const expectedId = profileIdMap.get(id) || profileId(id);
+    const exactId = profileIdMap.has(id) || requireCanonical;
+    if (!after.some(candidate =>
+      candidate.scope === scope &&
+      (exactId ? candidate.id : profileId(candidate.id)) === expectedId &&
+      (requireCanonical ? candidate.credential.provider : provider(candidate.credential.provider)) === provider(credential.provider) &&
+      fields.every(field => isDeepStrictEqual(credential[field], candidate.credential[field]))
+    )) {
       throw new Error("A saved provider credential or account identity did not survive migration; refusing activation");
     }
   }
 }
-module.exports = { agentDirectories, legacyAuthFiles, readProfiles, assertCredentialPreservation };
+module.exports = { agentDirectories, legacyAuthFiles, canonicalAuthStores, replaceCanonicalAuthStore, readProfiles, assertCredentialPreservation };

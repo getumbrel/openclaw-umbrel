@@ -4,20 +4,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { legacyAuthFiles } from "./upgrade-auth.cjs";
+import { legacyAuthFiles, canonicalAuthStores, replaceCanonicalAuthStore } from "./upgrade-auth.cjs";
+import { schemaInventory } from "./upgrade.cjs";
 import { inside, writeJson } from "./upgrade-storage.cjs";
 
 async function upstreamExport(root, name) {
   const directory = path.join(root, "dist");
-  const pattern = new RegExp(`\\b${name} as ([A-Za-z_$][\\w$]*)\\b`);
+  const pattern = new RegExp(`(?:^|,)\\s*${name}(?:\\s+as\\s+([A-Za-z_$][\\w$]*))?\\s*(?=,|$)`);
   for (const file of fs.readdirSync(directory).sort()) {
     if (!file.endsWith(".mjs")) continue;
     const source = fs.readFileSync(path.join(directory, file), "utf8");
-    const match = source.match(pattern);
+    const match = [...source.matchAll(/export\s*\{([^}]+)\}/g)].map(block => block[1].match(pattern)).find(Boolean);
     if (match) {
       const module = await import(pathToFileURL(path.join(directory, file)));
-      if (typeof module[match[1]] !== "function") throw new Error(`Missing upstream function ${name}`);
-      return module[match[1]];
+      const exported = match[1] || name;
+      if (typeof module[exported] !== "function") throw new Error(`Missing upstream function ${name}`);
+      return module[exported];
     }
   }
   throw new Error(`Pinned package does not export ${name}`);
@@ -41,14 +43,18 @@ if (operation === "oauth") {
   // Enumerating profiles through the old package also reads its agent-deletion
   // journal. Give it a separate home containing ONLY credential JSON and keys,
   // never the current databases. Candidate Doctor owns all database imports.
-  for (const file of legacyAuthFiles(process.env.OPENCLAW_STATE_DIR, config)) {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  const stores = [
+    ...legacyAuthFiles(process.env.OPENCLAW_STATE_DIR, config).map(file => ({ kind: "json", file, raw: JSON.parse(fs.readFileSync(file, "utf8")) })),
+    ...canonicalAuthStores(process.env.OPENCLAW_STATE_DIR, schemaInventory(process.env.OPENCLAW_STATE_DIR, config, process.env.HOME).databases),
+  ];
+  for (const store of stores) {
+    const { raw } = store;
     for (const [profileId, profile] of Object.entries(raw.profiles || {})) {
       if (profile?.type !== "oauth" || !profile.oauthRef) continue;
       const ref = profile.oauthRef;
       if (ref.source !== "openclaw-credentials" || ref.provider !== "openai-codex" || profile.provider !== ref.provider || !/^[a-f0-9]{32}$/.test(ref.id)) throw new Error("Unrecognized legacy OAuth reference");
       if (profile.access || profile.refresh || profile.idToken) throw new Error("Both inline and sidecar OAuth credentials exist; refusing to choose an account secret");
-      references.push({ file, profileId, ref });
+      references.push({ store, profileId, ref });
     }
   }
   if (references.length) {
@@ -56,11 +62,11 @@ if (operation === "oauth") {
     const scratch = fs.mkdtempSync(path.join(path.dirname(resultPath), "oauth-scratch-"));
     try {
       const state = path.join(scratch, ".openclaw"), oauth = path.join(state, "credentials");
-      const files = [...new Set(references.map(item => item.file))];
-      const mappings = files.map((file, index) => ({ file, id: `migration${index}`, copy: path.join(state, `agents/migration${index}/agent/auth-profiles.json`) }));
+      const pending = [...new Set(references.map(item => item.store))];
+      const mappings = pending.map((store, index) => ({ store, id: `migration${index}`, copy: path.join(state, `agents/migration${index}/agent/auth-profiles.json`) }));
       for (const item of mappings) {
         fs.mkdirSync(path.dirname(item.copy), { recursive: true, mode: 0o700 });
-        fs.copyFileSync(item.file, item.copy);
+        writeJson(item.copy, item.store.raw);
       }
       fs.mkdirSync(path.join(oauth, "auth-profiles"), { recursive: true, mode: 0o700 });
       for (const { ref } of references) {
@@ -84,16 +90,42 @@ if (operation === "oauth") {
       const repair = await upstreamExport(root, "maybeRepairLegacyOAuthSidecarProfiles");
       await repair({ cfg, env: process.env, emitNotes: false, prompter: { confirmAutoFix: async () => true } });
       // Validate every store before publishing any repaired credential file.
-      for (const { file, profileId } of references) {
-        const profile = JSON.parse(fs.readFileSync(mappings.find(item => item.file === file).copy, "utf8")).profiles?.[profileId];
+      for (const { store, profileId } of references) {
+        const profile = JSON.parse(fs.readFileSync(mappings.find(item => item.store === store).copy, "utf8")).profiles?.[profileId];
         if (profile?.oauthRef || !profile?.access || !profile?.refresh) throw new Error("Legacy OAuth material is missing or cannot be decrypted; original credentials are retained in the verified snapshot");
       }
-      for (const item of mappings) writeJson(fs.realpathSync(item.file), JSON.parse(fs.readFileSync(item.copy, "utf8")));
+      for (const item of mappings) {
+        const repaired = JSON.parse(fs.readFileSync(item.copy, "utf8"));
+        if (item.store.kind === "json") writeJson(fs.realpathSync(item.store.file), repaired);
+        else replaceCanonicalAuthStore(item.store, repaired);
+      }
     } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
   }
   // Original encrypted sidecars and keys remain intact, including references
   // from other agents. Only validated repaired JSON is published.
   fs.writeFileSync(resultPath, JSON.stringify({ repaired: references.length }), { mode: 0o600 });
+} else if (operation === "auth-map") {
+  const collect = await upstreamExport(root, "collectOpenAICodexAuthProfileStoreIdMap");
+  const mapping = collect({ cfg: config, env: process.env });
+  fs.writeFileSync(resultPath, JSON.stringify({ profileIds: [...mapping] }), { mode: 0o600 });
+} else if (operation === "telegram") {
+  const parserRoot = process.argv[5];
+  if (JSON.parse(fs.readFileSync(path.join(root, "package.json"))).version !== "2026.9.7" || JSON.parse(fs.readFileSync(path.join(parserRoot, "package.json"))).version !== "2026.9.5") throw new Error("Telegram migration packages changed");
+  // 9.5 still knows how to parse the retired files. Its detector and entry
+  // readers use the filesystem; only the schema-compatible 9.7 executor opens
+  // SQLite. Preserve upstream's account scopes, token-rotation comparisons,
+  // capacity checks, verification and source archival instead of copying rows.
+  const detect = await upstreamExport(parserRoot, "detectTelegramLegacyStateMigrations");
+  const execute = await upstreamExport(root, "runLegacyMigrationPlans");
+  const params = { cfg: config, env: process.env, stateDir: process.env.OPENCLAW_STATE_DIR };
+  const plans = await detect(params);
+  for (const plan of plans) {
+    if (plan.kind !== "plugin-state-import" || plan.pluginId !== "telegram" || !inside(process.env.HOME, fs.realpathSync(plan.sourcePath))) throw new Error("Unexpected Telegram migration plan");
+    plan.stateDir = params.stateDir;
+  }
+  const result = await execute(plans);
+  fs.writeFileSync(resultPath, JSON.stringify({ plans: plans.length, ...result }), { mode: 0o600 });
+  if (result.warnings?.length || (await detect(params)).length) throw new Error("Retired Telegram state did not migrate completely; original data will be restored");
 } else if (operation === "needs-config") {
   const requiresBridge = await upstreamExport(root, "findRetiredConfigUpgradeRequirement");
   fs.writeFileSync(resultPath, JSON.stringify({ required: Boolean(requiresBridge(config)) }), { mode: 0o600 });

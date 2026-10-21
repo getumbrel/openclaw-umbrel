@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { DatabaseSync } = require("node:sqlite");
-const { ensureUpgrade, schemaInventory } = require("../upgrade.cjs");
+const { ensureUpgrade, schemaInventory, requiresOldDataImporter } = require("../upgrade.cjs");
 const { inventory, sameInventory, DIRECTORY } = require("../upgrade-storage.cjs");
 
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "umbrel-upgrade-flow-")));
@@ -38,6 +38,7 @@ function fixture(name, version = 19) {
     async run(args) {
       calls.push(args);
       if (args[1] === "needs-config") fs.writeFileSync(args[3], '{"required":true}');
+      if (args[1] === "auth-map") fs.writeFileSync(args[3], '{"profileIds":[]}');
       if (args[1] === "config") fs.writeFileSync(args[3], JSON.stringify({ changed: true, config: { agents: { defaults: { heartbeat: { every: "37m" } } } } }));
       if (args[1] === "doctor") writeSchema(stateDir, path.basename(path.dirname(args[0])) === "2026.10.5" ? 20 : 19);
     },
@@ -84,8 +85,8 @@ test("a newer-than-target database is refused without running any migration", as
 });
 test("retired data needing the oldest bridge is retained when its database is too new", async () => {
   const f = fixture("old-data");
-  fs.mkdirSync(path.join(f.stateDir, "telegram"));
-  fs.writeFileSync(path.join(f.stateDir, "telegram/bot-info.json"), '{"retained":true}');
+  fs.mkdirSync(path.join(f.stateDir, "msteams"));
+  fs.writeFileSync(path.join(f.stateDir, "msteams/retained.json"), '{"retained":true}');
   const before = inventory(f.home);
   await assert.rejects(ensureUpgrade(f.options), /database-compatible importer/);
   assert.equal(f.calls.length, 0);
@@ -96,6 +97,16 @@ test("a state symlink outside the snapshot boundary is refused before commands o
   fs.symlinkSync(root, path.join(f.stateDir, "external"));
   await assert.rejects(ensureUpgrade(f.options), /outside the recoverable/);
   assert.equal(f.calls.length, 0);
+});
+test("retired channel detection follows internal links without looping or silently skipping their data", () => {
+  const f = fixture("linked-channel-data");
+  const directory = path.join(f.home, "retained-channel-data");
+  fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, "offset"), '{"version":1,"lastUpdateId":123}');
+  fs.symlinkSync(path.join(directory, "offset"), path.join(directory, "update-offset-default.json"));
+  fs.symlinkSync(directory, path.join(directory, "cycle"));
+  fs.symlinkSync(directory, path.join(f.stateDir, "telegram"));
+  assert.deepEqual(requiresOldDataImporter(f.stateDir), ["telegram/update-offset-default.json"]);
 });
 test("an internal directory link cannot conceal a second link outside the snapshot", async () => {
   const f = fixture("nested-outside-link");

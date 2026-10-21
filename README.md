@@ -100,7 +100,21 @@ Each bridge is admitted only when **all** discovered core and agent databases
 fit its declared schema limits. Older configuration can be transformed without
 opening those databases. Legacy OAuth JSON is repaired using upstream's bridge
 in a separate home containing only credential files and keys; the old package
-never receives the current databases. Original encrypted sidecars are retained.
+never receives the current databases. The same repair handles unresolved OAuth
+references in shared or agent SQLite stores: only credential JSON is copied to
+the isolated home, every referenced secret must decrypt, and publishing to the
+original store requires an unchanged source row. Store metadata, agent ownership
+and database schema versions are preserved. Original encrypted sidecars remain.
+Credential verification follows upstream's collision-safe profile renames while
+requiring identical secrets, account metadata and agent ownership. Its planner
+runs only through each schema-compatible bridge; planning can initialize state.
+
+For retained Telegram files beside schema 19, the 9.5 file parser feeds the 9.7
+database executor. This keeps upstream's account scopes, conflict comparisons,
+verification and archival without opening a newer database through 9.5. Tests
+forbid SQLite access from the old parser and verify offset import, retention of
+a newer canonical offset and preservation of another account.
+
 Maintenance and its descendants cannot create network sockets, and package
 downloads are deferred using upstream's update handoff. Normal CLI calls use
 the image's pinned OpenClaw, including when persistent npm storage has an older
@@ -127,22 +141,57 @@ fixtures and the full production image. The container tests cover initial
 upgrade, forced termination after SQLite changes, restoration, explicit retry,
 ordinary restart, fresh setup and Gateway authentication. Tests use synthetic
 credentials and isolated Docker networks; they do not prove live provider
-replies, channel delivery or encrypted Matrix room recovery. CI runs both
+replies, channel delivery or encrypted Matrix room recovery. CI runs the
 evidence suites on native amd64 and arm64.
 
-**Release remains held for unsupported retained layouts.** In particular,
+### Public release scope
+
+The [public app history](https://github.com/getumbrel/umbrel-apps/commits/master/openclaw),
+recorded in `test/migrations/shipped-history.json`, contains 45 OpenClaw commits
+and 44 distinct app versions through commit `f3e41f444ad3e7a0edffebca7e14fd7a2caf78e7`.
+The first was `2026.2.1`; the latest was `2026.9.8` (state schema 19). The public
+sequence went through both `2026.7.1-1` and `2026.7.1-2`, then `2026.9.2`,
+`2026.9.4` and `2026.9.8`. Neither Doctor bridge (`9.5` or `9.7`) nor a 10.x
+package was published in that history. Users can skip any intermediate update.
+
+Run `npm run test:shipped-upgrades` for eight representative published images:
+`2026.2.1`, `2026.4.1`, `2026.6.11`, both July packages, and the three September
+packages. Each image is pinned to its digest from the public app history and
+uses its original Node and dependencies. Its Doctor processes synthetic
+historical config, cron, Voice Wake, credentials and conversation files, then
+the production upgrader takes over the same persistent volume. The checks verify
+retained records, candidate readiness, the original backup and an ordinary
+restart. Both containers run with networking disabled. This covers core state
+at release boundaries, rather than every historical version or optional feature.
+Set `SHIPPED_VERSIONS` to a comma-separated subset for investigation; the report
+explicitly distinguishes a subset from a complete boundary matrix.
+
+**Release remains held for optional state reachable from public releases.**
+The production matrix creates retired Matrix and Telegram files before running
+the real `2026.9.8` Doctor with plugins disabled. That Doctor leaves the files
+unchanged beside schema 19. The wrapper's expected-refusal checks verify that
+Matrix originals survive; a green refusal test is not a successful app upgrade.
+Telegram offset cases instead require a successful import and verified values.
+
+In particular,
 upstream's [current Matrix migration guide](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/channels/matrix-migration.md)
 requires a 2026.6 bridge and a Gateway start for the original flat layout,
 followed by 2026.9.5 Doctor and a Matrix channel start. Retired account-scoped
 Matrix JSON sidecars also need 2026.9.5 Doctor and a Matrix start. The wrapper
 refuses both layouts before touching data, including disabled accounts; a
 Gateway canary with channels disabled cannot validate these imports or room-key
-recovery. Retired channel/plugin data needing 9.5 beside newer
-databases, retired Workboard data already on schema 20, and unresolved canonical
-OAuth references also stop safely rather than running an incompatible runtime.
-These refusals protect data; they do not satisfy a universal automatic upgrade.
-Keep the app update and wrapper PR in draft until the supported upgrade range
-and these remaining migration paths have been resolved and validated.
+recovery. Other retired channel/plugin layouts need their own provenance
+and preservation checks before being declared supported. Representative channel
+operation, provider replies and encrypted Matrix recovery remain unverified.
+
+Already-schema-20 Workboard state is a separate recovery case, not an ordinary
+starting state produced by the public releases above. Its safe-refusal guard and
+test remain, but it is not a blanket blocker for qualifying the public upgrade
+range. OAuth repair is tested both on shipped schema 19 and on schema 20 as extra
+recovery coverage; absent or damaged keys must still cause a refusal. Synthetic
+fixtures establish behavior and possible routes, not affected-user counts.
+Keep the app update and wrapper PR in draft while the applicable channel
+migration gaps remain unresolved.
 
 ## License
 

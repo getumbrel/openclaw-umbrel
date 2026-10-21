@@ -163,6 +163,7 @@ function inspectConfigPaths(home, stateDir, targetRoot) {
 // ability to use retained state when a disabled channel is enabled in future.
 function requiresOldDataImporter(stateDir) {
   const found = [];
+  const visited = new Set();
   for (const relative of ["tasks/runs.sqlite", "flows/registry.sqlite", "plugin-state/state.sqlite", "credentials/oauth.json", "plugins/installs.json"]) {
     if (fs.existsSync(path.join(stateDir, relative))) found.push(relative);
   }
@@ -170,10 +171,14 @@ function requiresOldDataImporter(stateDir) {
     const directory = path.join(stateDir, channel);
     if (!fs.existsSync(directory)) continue;
     function visit(dir) {
+      const physical = fs.realpathSync(dir);
+      if (visited.has(physical)) return;
+      visited.add(physical);
       for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
         const file = path.join(dir, item.name);
-        if (item.isDirectory()) visit(file);
-        else if (item.isFile() && item.name.endsWith(".json")) found.push(path.relative(stateDir, file));
+        const stat = item.isSymbolicLink() ? fs.statSync(file) : item;
+        if (stat.isDirectory()) visit(file);
+        else if (stat.isFile() && item.name.endsWith(".json")) found.push(path.relative(stateDir, file));
       }
     }
     visit(directory);
@@ -288,7 +293,8 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
       return { root, pkg, version };
     });
     const plan = packages.filter(entry => compatible(schemas, entry.pkg));
-    if (!plan.some(entry => entry.version === "2026.9.5") && requiresOldDataImporter(stateDir).length) {
+    const hasTelegramExecutor = plan.some(entry => entry.version === "2026.9.7");
+    if (!plan.some(entry => entry.version === "2026.9.5") && requiresOldDataImporter(stateDir).some(file => !hasTelegramExecutor || !file.startsWith("telegram/"))) {
       throw new Error("Retained legacy channel or plugin data needs a database-compatible importer; no older runtime was started");
     }
     if (!plan.some(entry => entry.version === "2026.9.7") && pendingWorkboard(stateDir)) throw new Error("Retired Workboard records need a database-compatible importer; no older runtime was started");
@@ -298,6 +304,7 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
     await run([path.join(__dirname, "upgrade-runtime.mjs"), "oauth", bridgeRoot("2026.9.7"), authResultPath], { env, signal, offline: true, log: path.join(directory, "oauth.log") });
     const credentials = readProfiles(stateDir, parseConfig(), schemas.databases);
     assertCredentialPreservation(credentials, credentials);
+    const profileIdMap = new Map();
     if (!plan.some(entry => entry.version === "2026.9.5")) {
       progress("Repairing older configuration without opening databases through an old runtime");
       const resultPath = path.join(directory, "configuration.json");
@@ -312,6 +319,21 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
       signal?.throwIfAborted();
       // Recheck after every migration, not just at plan construction.
       if (!compatible(schemaInventory(stateDir, parseConfig(), home), packageInfo(entry.root))) throw new Error(`Database schemas exceed bridge ${entry.version}`);
+      if (entry.version === "2026.9.7") {
+        progress("Importing retained Telegram files with the compatible database runtime");
+        await run([path.join(__dirname, "upgrade-runtime.mjs"), "telegram", entry.root, path.join(directory, "telegram.json"), bridgeRoot("2026.9.5")], { env, signal, offline: true, log: path.join(directory, "telegram.log") });
+      }
+      // The upstream census can initialize database-backed ownership metadata.
+      // Run it only through this already-admitted package, never the target
+      // ahead of older bridges. Compose its exact collision-safe ID mappings.
+      const authMapPath = path.join(directory, `auth-map-${entry.version}.json`);
+      await run([path.join(__dirname, "upgrade-runtime.mjs"), "auth-map", entry.root, authMapPath], { env, signal, offline: true, log: path.join(directory, `auth-map-${entry.version}.log`) });
+      const stepMap = new Map(JSON.parse(fs.readFileSync(authMapPath, "utf8")).profileIds);
+      for (const { id } of credentials) {
+        const current = profileIdMap.get(id) || id;
+        if (stepMap.has(current)) profileIdMap.set(id, stepMap.get(current));
+      }
+      if (!compatible(schemaInventory(stateDir, parseConfig(), home), packageInfo(entry.root))) throw new Error(`Auth planning exceeded bridge ${entry.version}`);
       progress(`Migrating with OpenClaw ${entry.version}`);
       const stepEnv = {
         ...env, PATH: `${path.resolve(entry.root, "../../../bin")}:${env.PATH}`,
@@ -337,7 +359,7 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
     progress("Verifying the upgraded databases and isolated Gateway startup");
     const finalSchemas = schemaInventory(stateDir, parseConfig(), home);
     assertSettledLegacyData(stateDir);
-    assertCredentialPreservation(credentials, readProfiles(stateDir, parseConfig(), finalSchemas.databases, { canonicalOnly: true }));
+    assertCredentialPreservation(credentials, readProfiles(stateDir, parseConfig(), finalSchemas.databases, { canonicalOnly: true }), { profileIdMap, requireCanonical: true });
     await run([path.join(__dirname, "upgrade-runtime.mjs"), "canary", targetRoot, path.join(directory, "readiness.json")], { env, signal, log: path.join(directory, "readiness.log"), timeout: 600_000 });
     signal?.throwIfAborted();
     storage.write(journal, "committed", { finalSchemas });
