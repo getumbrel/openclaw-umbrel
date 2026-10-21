@@ -319,10 +319,6 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
       signal?.throwIfAborted();
       // Recheck after every migration, not just at plan construction.
       if (!compatible(schemaInventory(stateDir, parseConfig(), home), packageInfo(entry.root))) throw new Error(`Database schemas exceed bridge ${entry.version}`);
-      if (entry.version === "2026.9.7") {
-        progress("Importing retained Telegram files with the compatible database runtime");
-        await run([path.join(__dirname, "upgrade-runtime.mjs"), "telegram", entry.root, path.join(directory, "telegram.json"), bridgeRoot("2026.9.5")], { env, signal, offline: true, log: path.join(directory, "telegram.log") });
-      }
       // The upstream census can initialize database-backed ownership metadata.
       // Run it only through this already-admitted package, never the target
       // ahead of older bridges. Compose its exact collision-safe ID mappings.
@@ -334,6 +330,10 @@ async function ensureUpgrade({ home, stateDir, targetRoot = TARGET_ROOT, bridgeR
         if (stepMap.has(current)) profileIdMap.set(id, stepMap.get(current));
       }
       if (!compatible(schemaInventory(stateDir, parseConfig(), home), packageInfo(entry.root))) throw new Error(`Auth planning exceeded bridge ${entry.version}`);
+      if (entry.version === "2026.9.7") {
+        progress("Importing retained Telegram files with the compatible database runtime");
+        await run([path.join(__dirname, "upgrade-runtime.mjs"), "telegram", entry.root, path.join(directory, "telegram.json"), bridgeRoot("2026.9.5")], { env, signal, offline: true, log: path.join(directory, "telegram.log") });
+      }
       progress(`Migrating with OpenClaw ${entry.version}`);
       const stepEnv = {
         ...env, PATH: `${path.resolve(entry.root, "../../../bin")}:${env.PATH}`,

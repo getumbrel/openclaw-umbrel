@@ -108,6 +108,8 @@ and database schema versions are preserved. Original encrypted sidecars remain.
 Credential verification follows upstream's collision-safe profile renames while
 requiring identical secrets, account metadata and agent ownership. Its planner
 runs only through each schema-compatible bridge; planning can initialize state.
+Doctor's schema repair runs first so earlier July database shapes can be
+read safely before the credential census.
 
 For retained Telegram files beside schema 19, the 9.5 file parser feeds the 9.7
 database executor. This keeps upstream's account scopes, conflict comparisons,

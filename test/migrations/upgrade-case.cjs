@@ -191,7 +191,9 @@ async function main() {
         assert.equal(config.auth.profiles[profileId], undefined);
         assert.deepEqual(config.auth.profiles[finalProfileId], { provider: "openai", mode: "oauth" });
         assert.equal(config.auth.order["openai-codex"], undefined);
-        assert.deepEqual(config.auth.order.openai, ["openai:migration-test", finalProfileId]);
+        // Upstream canonicalizeLegacyAuthOrder prepends migrated alias profiles
+        // to existing canonical-provider profiles, retaining both routes.
+        assert.deepEqual(config.auth.order.openai, [finalProfileId, "openai:migration-test"]);
       }
     } else if (id === "workboard") {
       success(await run([path.join(__dirname, "workboard.mjs"), packageRoot("target"), "verify"], home, path.join(results, "verify.log")), "Workboard content");

@@ -105,9 +105,16 @@ if (operation === "oauth") {
   // from other agents. Only validated repaired JSON is published.
   fs.writeFileSync(resultPath, JSON.stringify({ repaired: references.length }), { mode: 0o600 });
 } else if (operation === "auth-map") {
+  // Match Doctor's preflight order. A schema-compatible July database can still
+  // need the audit ledger migration before the auth census reads
+  // its agent-ownership journal. Use the admitted package's repair, with all
+  // upstream integrity/ownership guards intact, before inspecting credentials.
+  const repair = await upstreamExport(root, "repairOpenClawStateDatabaseSchema");
+  const schemaRepair = repair({ env: process.env });
+  if (schemaRepair.warnings?.length) throw new Error(schemaRepair.warnings.join("\n"));
   const collect = await upstreamExport(root, "collectOpenAICodexAuthProfileStoreIdMap");
   const mapping = collect({ cfg: config, env: process.env });
-  fs.writeFileSync(resultPath, JSON.stringify({ profileIds: [...mapping] }), { mode: 0o600 });
+  fs.writeFileSync(resultPath, JSON.stringify({ profileIds: [...mapping], schemaRepair }), { mode: 0o600 });
 } else if (operation === "telegram") {
   const parserRoot = process.argv[5];
   if (JSON.parse(fs.readFileSync(path.join(root, "package.json"))).version !== "2026.9.7" || JSON.parse(fs.readFileSync(path.join(parserRoot, "package.json"))).version !== "2026.9.5") throw new Error("Telegram migration packages changed");

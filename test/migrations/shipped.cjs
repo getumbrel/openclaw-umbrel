@@ -37,6 +37,8 @@ function docker(args, options = {}) {
 const cases = [];
 try {
   docker(["build", "--build-arg", `OPENCLAW_TARGET_VERSION=${target}`, "-f", "test/migrations/Dockerfile", "-t", image, "."]);
+  // Concurrent local suites may rebuild the tag. Keep this run on one image.
+  const candidate = docker(["image", "inspect", "--format", "{{.Id}}", image], { stdio: "pipe", encoding: "utf8" }).trim();
   for (const version of versions) {
     console.log(`Preparing and upgrading shipped OpenClaw ${version}`);
     active = `openclaw-shipped-${randomUUID()}`;
@@ -49,7 +51,7 @@ try {
       }
       volume = `${active}-data`;
       docker(["volume", "create", volume]);
-      docker(["run", "--rm", "--name", active, "--network", "none", "--user", "0:0", "-v", `${volume}:/data`, "--entrypoint", "chown", image, "1000:1000", "/data"]);
+      docker(["run", "--rm", "--name", active, "--network", "none", "--user", "0:0", "-v", `${volume}:/data`, "--entrypoint", "chown", candidate, "1000:1000", "/data"]);
       const common = ["run", "--rm", "--init", "--name", active, "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "-v", `${volume}:/data`, "-v", `${results}:/results`];
       const fd = fs.openSync(path.join(results, `source-${version}.log`), "w", 0o644);
       try {
@@ -57,7 +59,7 @@ try {
       } finally { fs.closeSync(fd); }
       // The stopped historical container has released all database handles. Its
       // volume keeps /data paths, ownership and permissions unchanged on upgrade.
-      docker([...common, "-e", "SHIPPED_PREPARED_HOME=/data", image, "node", "/tests/upgrade-case.cjs", `shipped-${version}`]);
+      docker([...common, "-e", "SHIPPED_PREPARED_HOME=/data", candidate, "node", "/tests/upgrade-case.cjs", `shipped-${version}`]);
       const evidence = JSON.parse(fs.readFileSync(path.join(results, `upgrade-shipped-${version}`, "result.json")));
       if (!evidence.passed || evidence.source?.appVersion !== version || evidence.source.package !== release.upstreamVersion) throw new Error("Missing successful source-package evidence");
       if (evidence.source.image !== release.image || evidence.source.architecture !== process.arch) throw new Error("Source image or native architecture does not match the public release");

@@ -33,16 +33,20 @@ function docker(args) {
 console.log(`Testing OpenClaw ${target}; reports: ${reportDir}`);
 let code = docker(["build", "--build-arg", `OPENCLAW_TARGET_VERSION=${target}`, "-f", "test/migrations/Dockerfile", "-t", tag, "."]);
 if (code === 0) {
+  // Do not let another local build change the runtime between fixture cases.
+  const inspected = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", tag], { encoding: "utf8" });
+  if (inspected.status !== 0) throw new Error("Cannot identify the built test image");
+  const testImage = inspected.stdout.trim();
   started = true;
   try {
     const base = ["run", "--rm", "--init", "--name", name, "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "-v", `${reportDir}:/results`];
     if (production) {
-      code = docker([...base, tag, "npm", "--prefix", "/app", "test"]);
+      code = docker([...base, testImage, "npm", "--prefix", "/app", "test"]);
       for (const id of upgradeCases) {
         if (code !== 0) break;
-        code = docker([...base, tag, "node", "/tests/upgrade-case.cjs", id]);
+        code = docker([...base, testImage, "node", "/tests/upgrade-case.cjs", id]);
       }
-    } else code = docker([...base, ...(process.env.MIGRATION_CASES ? ["-e", `MIGRATION_CASES=${process.env.MIGRATION_CASES}`] : []), tag]);
+    } else code = docker([...base, ...(process.env.MIGRATION_CASES ? ["-e", `MIGRATION_CASES=${process.env.MIGRATION_CASES}`] : []), testImage]);
   } finally { cleanup(); }
 }
 if (production && code === 0) {
