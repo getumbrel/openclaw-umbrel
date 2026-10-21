@@ -156,7 +156,9 @@ package was published in that history. Users can skip any intermediate update.
 
 Run `npm run test:shipped-upgrades` for eight representative published images:
 `2026.2.1`, `2026.4.1`, `2026.6.11`, both July packages, and the three September
-packages. Each image is pinned to its digest from the public app history and
+releases. The `7.1-1` app image contains upstream `7.1`; the `7.1-2` image contains
+upstream `7.1-2`. The harness records and checks both versions separately.
+Each image is pinned to its digest from the public app history and
 uses its original Node and dependencies. Its Doctor processes synthetic
 historical config, cron, Voice Wake, credentials and conversation files, then
 the production upgrader takes over the same persistent volume. The checks verify

@@ -35,7 +35,7 @@ async function main() {
   let sourceEvidence;
   if (prepared) {
     sourceEvidence = JSON.parse(fs.readFileSync(path.join(process.env.MIGRATION_REPORT_DIR, `source-${id.slice("shipped-".length)}.json`)));
-    assert.equal(sourceEvidence.package, id.slice("shipped-".length));
+    assert.equal(sourceEvidence.appVersion, id.slice("shipped-".length));
     sourceEvidence.schemas = schemas(stateDir);
     fs.writeFileSync(path.join(results, "source.json"), JSON.stringify(sourceEvidence, null, 2));
   } else if (["matrix-retained-9.8", "telegram-retained-9.8", "telegram-conflict-9.8"].includes(id)) {
