@@ -9,6 +9,9 @@ const { spawnSync } = require("node:child_process");
 const history = require("../migrations/shipped-history.json");
 const repo = path.resolve(__dirname, "../..");
 const versions = ["2026.9.2", "2026.9.4", "2026.9.8"];
+const required = [...versions, "fresh"];
+const selected = process.env.UPGRADE_CASES?.split(",") || required;
+if (!selected.length || new Set(selected).size !== selected.length || selected.some(c => !required.includes(c))) throw new Error("UPGRADE_CASES must select distinct recent versions or fresh");
 const target = fs.readFileSync(path.join(repo, "Dockerfile"), "utf8").match(/npm install -g openclaw@([^\s\\]+)/)[1];
 const tag = `openclaw-umbrel:recent-${target}`;
 const reports = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-recent-upgrades-"));
@@ -17,7 +20,7 @@ if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `rep
 const id = randomUUID(), network = `openclaw-recent-${id}`, client = `openclaw-client-${id}`;
 const names = new Set(), volumes = new Set(), pulled = new Set();
 let candidate, networkCreated = false;
-const report = { target, architecture: process.arch, passed: false, requiredVersions: versions, cases: [], limitations: ["synthetic core-state fixtures", "no live provider or channel calls", "no interactive TUI onboarding", "retired formats and very old installations are outside qualification"] };
+const report = { target, architecture: process.arch, passed: false, completeQualification: false, requiredVersions: versions, requestedCases: selected, cases: [], limitations: ["synthetic core-state fixtures", "no live provider or channel calls", "no interactive TUI onboarding", "retired formats and very old installations are outside qualification"] };
 function docker(args, options = {}) {
   const temporary = args[0] === "run" && args.includes("--rm") && !args.includes("--name") ? `openclaw-check-${randomUUID()}` : undefined;
   if (temporary) { args = ["run", "--name", temporary, ...args.slice(1)]; names.add(temporary); }
@@ -80,7 +83,13 @@ async function scenario(version) {
   const row = { version, passed: false }; report.cases.push(row);
   initVolume(volume);
   try {
-    if (!fresh) {
+    if (fresh) {
+      // OpenAI onboarding installs this upstream runtime. Install the pinned
+      // real dependency before adding any credentials, then isolate onboarding
+      // and Gateway traffic from external services for the rest of the test.
+      logged(["run", "--rm", "--init", ...env, ...mounts(volume), candidate, "openclaw", "plugins", "install", `@openclaw/codex@${target}`], "fresh-runtime-install.log", 600000);
+      row.runtimeDependency = `@openclaw/codex@${target}`;
+    } else {
       const release = history.releases.find(r => r.appVersion === version);
       assert.ok(release?.image.includes("@sha256:") && release.upstreamVersion);
       if (spawnSync("docker", ["image", "inspect", release.image], { stdio: "ignore" }).status !== 0) {
@@ -121,10 +130,11 @@ async function main() {
   docker(["run", "-d", "--init", "--name", client, "--network", network, "-v", `${repo}/test:/app/test:ro`, candidate, "sleep", "infinity"]);
   logged(["run", "--rm", "--init", "--network", "none", "-v", `${repo}/test:/app/test:ro`, candidate, "npm", "--prefix", "/app", "test"], "unit-tests.log");
   report.unitTests = true;
-  for (const version of [...versions, "fresh"]) await scenario(version);
+  for (const version of selected) await scenario(version);
   logged(["run", "--rm", "--init", "--network", "none", "-e", "HOME=/tmp/refusal", "-e", "OPENCLAW_STATE_DIR=/tmp/refusal/.openclaw", "-v", `${repo}/test:/tests:ro`, candidate, "node", "/tests/upgrades/fixture.cjs", "refusal"], "retired-input.log");
   report.retiredInputPreserved = true;
-  report.passed = report.cases.length === 4 && report.cases.every(c => c.passed);
+  report.passed = report.cases.length === selected.length && report.cases.every(c => c.passed);
+  report.completeQualification = report.passed && required.every(version => report.cases.some(c => c.version === version));
 }
 main().catch(error => { report.error = error.stack; console.error(error); process.exitCode = 1; }).finally(() => {
   cleanup();

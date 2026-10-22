@@ -110,11 +110,16 @@ The checks cover conversation history, saved automation, Voice Wake, API-key and
 inline OAuth profiles, workspace/settings preservation, SQLite integrity,
 Gateway readiness, wrapper authentication and restart. A separate fresh volume
 covers the setup page, upstream non-interactive onboarding, readiness and restart.
+A pinned upstream Codex runtime is installed in that volume before introducing
+synthetic credentials, so OpenAI onboarding can run without external access.
 A retired-cron fixture checks that upstream refusal preserves its source data.
 Neither the preparation nor verification runs custom production migration code.
+Use `UPGRADE_CASES=fresh` or a comma-separated list of supported versions for a
+focused investigation; subset reports do not count as complete qualification.
 
-CI runs this suite on native amd64 and arm64. The tests use synthetic credentials
-and isolated Docker networks; they do not prove live provider replies, channel
+CI runs the complete suite on native amd64 and arm64. Image builds and dependency
+installation require registry access; credential-bearing fixtures and Gateway
+checks run on isolated Docker networks. They do not prove live provider replies, channel
 delivery, interactive TUI onboarding or encrypted Matrix recovery. The historical
 image inventory remains in `test/migrations/shipped-history.json` for reference,
 not as a promise to support every old version indefinitely.
