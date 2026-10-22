@@ -53,6 +53,79 @@ These checks enroll a test browser device and verify dashboard/bootstrap access,
 device-less and signed-device handshakes, admin RPC access, stale credentials,
 and cross-origin request rejection. They do not call an AI provider.
 
+### Migration compatibility lab
+
+Run `npm run test:migrations` with Docker available to test the OpenClaw version
+pinned in the production Dockerfile. To investigate another exact release:
+
+```sh
+OPENCLAW_MIGRATION_TARGET=2026.10.5 npm run test:migrations
+```
+
+The lab builds a separate image containing the candidate and pinned `2026.9.5`,
+`2026.9.7`, and `2026.9.8` packages. It runs the real Doctor CLI with networking
+disabled against disposable synthetic homes. It never mounts app data or uses
+real credentials. The command prints the location of `matrix.json`, per-step
+logs, and copies of failed fixtures. The image is retained for subsequent runs;
+the test container is removed. Set `MIGRATION_CASES` to a comma-separated list
+of case IDs from `test/migrations/matrix.cjs` to repeat a specific case.
+
+Coverage includes legacy cron JSON, Voice Wake settings, retired configuration,
+Workboard cards/boards/subscriptions/attachment bytes, conversation messages,
+saved provider credentials, and workspace files. Tests also cover retained
+legacy data beside a `2026.9.8` database, interruption after a cron import commits,
+idempotent retries, and restoring a matching old runtime after a full snapshot
+that includes committed SQLite WAL data. Verification reads persisted records
+and checks database integrity; a successful Doctor exit alone is insufficient.
+
+The Doctor matrix records expected refusals as well as working migration paths;
+passing that matrix alone does not establish release readiness. This is an
+optional investigation lab, separate from the release qualification below.
+Upstream's [migration retention policy](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/gateway/doctor/config-migrations.md#retention-policy)
+and [intermediate-release guidance](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/install/updating.md#upgrading-very-old-versions)
+describe the historical formats that need intermediate releases. Those recovery
+routes are not implemented by the Umbrel wrapper.
+
+### Upgrade support and release qualification
+
+For the `2026.10.5` update, the release matrix covers the three most recent
+public App Store versions: `2026.9.2`, `2026.9.4` and `2026.9.8`, plus a fresh
+installation. This assumes an installation has completed normal upstream
+migrations on a recent release. A recent version number alone does not prove
+that disabled plugins or imported data have current formats.
+
+The wrapper uses the image's pinned OpenClaw CLI and upstream's Gateway startup
+migrations. Its existing bounded startup repair uses that same version's Doctor.
+It does not ship older Doctor runtimes, rewrite credential databases, or maintain
+a separate snapshot/rollback engine. Upstream refusals remain failures; the
+wrapper does not bypass them or delete retained data. Very old installations
+and retained retired formats may need upstream's intermediate-release recovery
+steps and are outside this automatic-upgrade qualification. Back up app data
+before updating; changing the image back alone does not reverse database changes.
+
+Run `npm run test:upgrades` with Docker available. It builds the production
+image, prepares synthetic records with each digest-pinned published image's own
+Node and Doctor, then starts the normal candidate wrapper on the same volume.
+The checks cover conversation history, saved automation, Voice Wake, API-key and
+inline OAuth profiles, workspace/settings preservation, SQLite integrity,
+Gateway readiness, wrapper authentication and restart. A separate fresh volume
+covers the setup page, upstream non-interactive onboarding, readiness and restart.
+Persisted records are inspected with the Gateway stopped before and after the
+restart; live readiness and authentication checks use HTTP and WebSocket APIs.
+A pinned upstream Codex runtime is installed in that volume before introducing
+synthetic credentials, so OpenAI onboarding can run without external access.
+A retired-cron fixture checks that upstream refusal preserves its source data.
+Neither the preparation nor verification runs custom production migration code.
+Use `UPGRADE_CASES=fresh` or a comma-separated list of supported versions for a
+focused investigation; subset reports do not count as complete qualification.
+
+CI runs the complete suite on native amd64 and arm64. Image builds and dependency
+installation require registry access; credential-bearing fixtures and Gateway
+checks run on isolated Docker networks. They do not prove live provider replies, channel
+delivery, interactive TUI onboarding or encrypted Matrix recovery. The historical
+image inventory remains in `test/migrations/shipped-history.json` for reference,
+not as a promise to support every old version indefinitely.
+
 ## License
 
 MIT

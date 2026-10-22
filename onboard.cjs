@@ -6,7 +6,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 async function main() {
-  const executable = (process.env.PATH || "").split(path.delimiter)
+  const executable = process.env.UMBREL_OPENCLAW_CLI || (process.env.PATH || "").split(path.delimiter)
     .map((directory) => path.join(directory, "openclaw"))
     .find((candidate) => {
       try {

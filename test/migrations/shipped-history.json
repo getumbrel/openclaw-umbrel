@@ -1,0 +1,280 @@
+{
+  "repository": "getumbrel/umbrel-apps",
+  "path": "openclaw",
+  "auditedThrough": "f3e41f444ad3e7a0edffebca7e14fd7a2caf78e7",
+  "commitCount": 45,
+  "releases": [
+    {
+      "appVersion": "2026.2.1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.1-browser@sha256:3faa7a6b89a97dc78aa0636e3d95740adbcf0a5c1fc07fd7cbb826e72a23228a",
+      "commit": "1c6a8adcb9fe7b70d7d5d6c61df5aae9bd52880a",
+      "mergedAt": "2026-02-03T14:24:58Z",
+      "upstreamVersion": "2026.2.1"
+    },
+    {
+      "appVersion": "2026.2.3",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.3@sha256:f99d9e6b42a617eb3edb896c538b82747ab3f84388df255d049e19ed179d142e",
+      "commit": "d76994e1492e08fe8bab999b2f28633ddf0362aa",
+      "mergedAt": "2026-02-05T10:13:13Z"
+    },
+    {
+      "appVersion": "2026.2.9",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.9-setup-changes@sha256:3fe0a64cd32696203107b70c510e96d9beedfa57fea5dfa49b26ce45609f004d",
+      "commit": "930d8d7748beb0225c6f4a6580327c80be99a1f3",
+      "mergedAt": "2026-02-10T15:04:15Z"
+    },
+    {
+      "appVersion": "2026.2.12",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.12@sha256:0f5d69627686c0f0428b3d98f892fdc1e04283281c566ca2e234b80fad23ab4d",
+      "commit": "aba74e9d2d812a8aed8e988b9c5a7ea7f211823f",
+      "mergedAt": "2026-02-13T14:31:36Z"
+    },
+    {
+      "appVersion": "2026.2.15",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.15@sha256:72dee9df4e86b8b498e4de17041da4ade76c1a753e62859209ba13968ac07657",
+      "commit": "dc6d2d0d1cb0367e80e8c66c439ac36e1dffd368",
+      "mergedAt": "2026-02-17T08:05:47Z"
+    },
+    {
+      "appVersion": "2026.2.17",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.17@sha256:20c64fc09574e36897888c39127a02dad9133ab9f6e2a851b7300ae5635ee1d4",
+      "commit": "9144b2a310b417ab6666fa7d331b4e6ce49675ed",
+      "mergedAt": "2026-02-18T10:31:33Z"
+    },
+    {
+      "appVersion": "2026.2.19",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.19@sha256:ab0c2684f9a1db84d82277d465e6ff9c090225d690470b0c1f8c424405f5e7e0",
+      "commit": "50999867f651e0fb37e574878f9b626a25eb4650",
+      "mergedAt": "2026-02-20T12:48:17Z"
+    },
+    {
+      "appVersion": "2026.2.26",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.2.26@sha256:27215a8f6c547e32cd2968d32493a672171ed53145b9036b9bec4683f8adf020",
+      "commit": "a03cd6201decb6c852dd8cdbc0ca9fe3d61f99c0",
+      "mergedAt": "2026-02-27T01:18:47Z"
+    },
+    {
+      "appVersion": "2026.3.1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.3.1@sha256:cba9b55ba3a0b187fc6ce9572416fd29e9dfd89c87de95b2b10f843d979647af",
+      "commit": "c33ee2d93650fc4a3d7d442fb3b61c4ac87d38c0",
+      "mergedAt": "2026-03-02T15:52:35Z"
+    },
+    {
+      "appVersion": "2026.3.2",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.3.2@sha256:7c28200a61120999a1b44797c870e2162754e4da7bf204a9877c2c8c8ea05b9a",
+      "commit": "824b6934fbeca1bb4d7bff524de2ef6f6efa044c",
+      "mergedAt": "2026-03-05T10:15:06Z"
+    },
+    {
+      "appVersion": "2026.3.8",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.3.8@sha256:430755b4e994ff54bd9850bec75097c3bc320863454848047dcf2b6095c55dcb",
+      "commit": "e986fb155c3fd22fd7a96bc7c91ed6248b578c98",
+      "mergedAt": "2026-03-10T06:16:05Z"
+    },
+    {
+      "appVersion": "2026.3.13",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.3.13@sha256:21697123f5dbc7aab2281281ba7a9432c2363a25b260cddbbef673af4e0b8eae",
+      "commit": "2621b79423de69b8a11501322e18000a43b1fc65",
+      "mergedAt": "2026-03-17T12:35:51Z"
+    },
+    {
+      "appVersion": "2026.3.24",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.3.24@sha256:cde7ae2a268be3212d533901e730fd5a91b45b858671985f1b244da2035f6604",
+      "commit": "da6f6a85e4802eac0e00ab417e4c142a76eeb211",
+      "mergedAt": "2026-03-26T11:10:55Z"
+    },
+    {
+      "appVersion": "2026.3.28",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.3.28@sha256:cf1da185d73b9d0849bc9bf09f1ff7caf96463aecc092264b945fb2eb98ca37c",
+      "commit": "1b2bcd68274d25336d3be828fc906f1caa147911",
+      "mergedAt": "2026-03-30T08:58:49Z"
+    },
+    {
+      "appVersion": "2026.4.1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.4.1@sha256:ceac963c14b97ff43c1e231fa34085b9d8560faa3a72fc7f57b9e7fc67f84af7",
+      "commit": "6dfeac1df8080fe43915a5e8334aba58ac8fadd6",
+      "mergedAt": "2026-04-02T07:51:46Z",
+      "upstreamVersion": "2026.4.1"
+    },
+    {
+      "appVersion": "2026.4.2",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.4.2@sha256:efa20e9cb4c9f5510c93f1d3357e90fceac0c7e90c65aa3a0165663a97f2760b",
+      "commit": "810c3120163558e038f0c53e9482670f71d92f47",
+      "mergedAt": "2026-04-03T07:01:04Z"
+    },
+    {
+      "appVersion": "2026.4.12",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.4.12@sha256:acdd29f751e1ceac25a1983f1c7679aa18a6858fb46c50e91db52d7b6f38ba89",
+      "commit": "61e66aa3545bce0f77a8a4d866dda5b508bbc3b2",
+      "mergedAt": "2026-04-14T10:27:55Z"
+    },
+    {
+      "appVersion": "2026.4.14",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.4.14@sha256:90be9c46cae1902c520196677f127c773305ad80de523b077e7f75ee0fdb48e5",
+      "commit": "accb0828f8dc3ca713029774eb886260b1138d8f",
+      "mergedAt": "2026-04-14T23:31:18Z"
+    },
+    {
+      "appVersion": "2026.4.27",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.4.27@sha256:276006c9c44d6f60b863bb8642a1207f8cac41411b6ea01de21c6087bf20b2e8",
+      "commit": "6c9be64e7031956232791769ba106a54469b77e1",
+      "mergedAt": "2026-04-30T04:03:29Z"
+    },
+    {
+      "appVersion": "2026.4.29",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.4.29-1@sha256:89968e9358f204c847f17774070fc6eb4feff62c70a70fcfb20bc4a24dc38d46",
+      "commit": "b495fb1e10da916f91e9b85faa2eaf15701453ac",
+      "mergedAt": "2026-05-01T02:59:10Z"
+    },
+    {
+      "appVersion": "2026.5.3",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.3@sha256:96e34e11602e4f4e13f707109943cd96a92050d6bdf69e996ec880285d89ba00",
+      "commit": "93f96409935ac13816047cfca485992be79d8f32",
+      "mergedAt": "2026-05-04T11:51:58Z"
+    },
+    {
+      "appVersion": "2026.5.6",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.6@sha256:38393b545f7fb6c1857a8274de53ecf318634a16bb0c9b2e99bb1d7014a13fcb",
+      "commit": "abdb8401d4343579edaabadb63b7e76f1cc96800",
+      "mergedAt": "2026-05-07T09:25:49Z"
+    },
+    {
+      "appVersion": "2026.5.7",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.7@sha256:6afdf56032f313e6e8c3cce1e86e1a41d35ac48d9ba39edfddbe85eeca709cb6",
+      "commit": "84ec5de9993be8bdacb41eeb3e665999928d14d2",
+      "mergedAt": "2026-05-08T14:44:57Z"
+    },
+    {
+      "appVersion": "2026.5.12",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.12@sha256:9f133ccb61cf42f6ba4192e6f93cd4550f897e819317eeb83c1aa5ac9059c4af",
+      "commit": "f1edd3604a7b7f2403dbfd16e3b6a5dc2ca35650",
+      "mergedAt": "2026-05-17T11:46:24Z"
+    },
+    {
+      "appVersion": "2026.5.18",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.18@sha256:d0614942c28d625045fbf1864521ceb466cb7bca97bd34db2aeb2a6ce02acfc1",
+      "commit": "73b40b1e608ec7cbf99a295bb4b2e653be14af0f",
+      "mergedAt": "2026-05-19T03:06:54Z"
+    },
+    {
+      "appVersion": "2026.5.18-1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.18-1@sha256:a6e43e3039639174028bfa77b74ed470de7b5b04f802729509f5033246081ca9",
+      "commit": "19e9f98b2db7fbcdf2714ca8a97d45611a4d6cf1",
+      "mergedAt": "2026-05-20T02:41:28Z"
+    },
+    {
+      "appVersion": "2026.5.19",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.19@sha256:e14dcf3df91bc9587c753da2fed3bb619209e666ad5bde6762d9c14e92e7e1ab",
+      "commit": "aacbea6970f486c1d5df962bf3524650ccf93c72",
+      "mergedAt": "2026-05-21T11:19:05Z"
+    },
+    {
+      "appVersion": "2026.5.20",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.20@sha256:55514450790207831a1aeb501758a6b8cdbd0e10c010382e407b3d986882d16c",
+      "commit": "d74dd9e3d949c14e5df3bed1299bb3afd48be7d1",
+      "mergedAt": "2026-05-22T20:42:07Z"
+    },
+    {
+      "appVersion": "2026.5.22",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.22@sha256:6bfb27aa7f8cb6ee31d95639a6f15eeb6e4ff2eeebb2bb26ba6ea7e40bc9f49d",
+      "commit": "09b9d0b6e4bc83082ebf9f01c3d243ac27de85a9",
+      "mergedAt": "2026-05-26T11:24:06Z"
+    },
+    {
+      "appVersion": "2026.5.26",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.26@sha256:6b47dba320cf699ba1b22e9320e7b04e328a8d71d06d8e4ee378a61b8fb2615b",
+      "commit": "e1c2c4de7f0a48865b05fcc44244cec480589d1d",
+      "mergedAt": "2026-05-27T23:27:58Z"
+    },
+    {
+      "appVersion": "2026.5.27",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.27@sha256:7ec1c8f6d4b35b79f80445307b86f3ed381038e004f249dd7a6c4a278fe95d1e",
+      "commit": "00796f9fece38176d0b5f77342de996145fbde51",
+      "mergedAt": "2026-05-29T03:15:46Z"
+    },
+    {
+      "appVersion": "2026.5.28-1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.5.28-1@sha256:5a8efcfbff290a3508893433760462c5ea48d278f76f1d8c4382c9c56500a376",
+      "commit": "3e7b3aa5fbd0658823a9647262eaf511c7dab05e",
+      "mergedAt": "2026-06-02T03:22:00Z"
+    },
+    {
+      "appVersion": "2026.6.1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.1@sha256:8b0c45a4f23e7da7c388e77f60387798f8a2303141b69531a51116cef775954e",
+      "commit": "d16b52e750f736d5ec28416c6f0ca65fa2324199",
+      "mergedAt": "2026-06-04T23:14:07Z"
+    },
+    {
+      "appVersion": "2026.6.5",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.5@sha256:7b8ae987ff64f8ca940d283ca847ef986c6e8b8bdef0de2217382202888bcee0",
+      "commit": "6538b3e69725098527ca4ac5d4bb171c0bfda629",
+      "mergedAt": "2026-06-11T12:35:37Z"
+    },
+    {
+      "appVersion": "2026.6.6",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.6@sha256:ae66f230a6d1f39a35ae4ee9fe57be6fcf7372dfa4d34915edd7ec156a7a960f",
+      "commit": "8c7ba7496da94d1f35a6eb07dc36a66425e4ef46",
+      "mergedAt": "2026-06-15T22:30:08Z"
+    },
+    {
+      "appVersion": "2026.6.8",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.8@sha256:91698f60fc7ffd1039dc4f9728d1c6aba73dd1508c18296f0418fb97ce34322f",
+      "commit": "1233a57613858e1fae595e2af3560d53c887d5aa",
+      "mergedAt": "2026-06-17T03:59:18Z"
+    },
+    {
+      "appVersion": "2026.6.9",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.9@sha256:f5c3cd60ab7c5f0f93c174bd3c8fc3a5a9cc5cad0d0ad0025bf98def3855b9bd",
+      "commit": "3cf076146564ee1db1110800627a365a88d75790",
+      "mergedAt": "2026-06-23T00:22:42Z"
+    },
+    {
+      "appVersion": "2026.6.10",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.10@sha256:4c3ef69b3f47195c6043e258f8ef3f7380804df3ec78dfda3e57fc7e93bbc70e",
+      "commit": "7006a0eab05c723b92083a32f572c3419b414c5f",
+      "mergedAt": "2026-06-24T11:03:34Z"
+    },
+    {
+      "appVersion": "2026.6.11",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.6.11@sha256:6bd4c170d5fc4c221cc3fed0c5cedb048765b89367a240622d42c4ffead0ae80",
+      "commit": "9bda98145b0d1f9df9c334ea657bb50f5f2a64d9",
+      "mergedAt": "2026-07-01T05:54:31Z",
+      "upstreamVersion": "2026.6.11"
+    },
+    {
+      "appVersion": "2026.7.1-1",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.7.1-1@sha256:4c3f4dae999b1b9fd2c838ff89ae30a05c95ca06c0712ea4e9ed8cd6c5a9a283",
+      "commit": "61c7b4fc3e96103b5029f554fb0039469b591eb7",
+      "mergedAt": "2026-07-15T08:51:00Z",
+      "upstreamVersion": "2026.7.1"
+    },
+    {
+      "appVersion": "2026.7.1-2",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.7.1-2@sha256:fc6febfba3ac82318aa9b02377edeee935f7cb2c359160befc9d54b098e3b701",
+      "commit": "6e1bb3ae475c8c76040862129bd6af350e0ea5be",
+      "mergedAt": "2026-08-10T04:20:51Z",
+      "upstreamVersion": "2026.7.1-2"
+    },
+    {
+      "appVersion": "2026.9.2",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.9.2@sha256:9de61dcbea27078efbda551957726e5b09efe7b3f12270360bc091ba603c8a4a",
+      "commit": "813dcbd5b5d3edf1448bcd1b156e79fbfb7970cc",
+      "mergedAt": "2026-09-08T11:08:13Z",
+      "upstreamVersion": "2026.9.2"
+    },
+    {
+      "appVersion": "2026.9.4",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.9.4-1@sha256:f021c2474a3d5238aae0e3e0b38caaee5ee69aad1c42c9b81ac7c7cfc24fa4a4",
+      "commit": "fb85c63e2032f55644d4de770096b6a620294993",
+      "mergedAt": "2026-09-18T03:35:22Z",
+      "upstreamVersion": "2026.9.4"
+    },
+    {
+      "appVersion": "2026.9.8",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.9.8@sha256:86627b7fafd490174cd624814389bfe0e9ec4744cad2540baee6bc8057882882",
+      "commit": "f3e41f444ad3e7a0edffebca7e14fd7a2caf78e7",
+      "mergedAt": "2026-10-03T13:34:28Z",
+      "upstreamVersion": "2026.9.8"
+    }
+  ]
+}

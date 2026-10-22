@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-function launch(t, source) {
+function launch(t, source, { pinned = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-onboard-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const cli = path.join(dir, "openclaw.mjs");
@@ -13,6 +13,14 @@ function launch(t, source) {
   fs.symlinkSync(cli, path.join(dir, "openclaw"));
   const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`,
     UMBREL_ONBOARD_COMPILE_CACHE: path.join(dir, "cache") };
+  delete env.UMBREL_OPENCLAW_CLI;
+  if (pinned) {
+    const stale = path.join(dir, "stale");
+    fs.mkdirSync(stale);
+    fs.writeFileSync(path.join(stale, "openclaw"), "throw new Error('stale CLI selected');", { mode: 0o755 });
+    env.PATH = `${stale}${path.delimiter}${env.PATH}`;
+    env.UMBREL_OPENCLAW_CLI = cli;
+  }
   delete env.NODE_COMPILE_CACHE;
   const child = spawn(process.execPath, [path.resolve(__dirname, "../onboard.cjs"), "onboard", "--classic"], {
     env, stdio: ["pipe", "pipe", "pipe"],
@@ -64,6 +72,13 @@ test("waits for prompts and async cleanup, then exits despite leftover handles",
 test("preserves an unsuccessful CLI exit code", { timeout: 5000 }, async (t) => {
   const { done } = launch(t, "process.exitCode = 7; setInterval(() => {}, 1000);");
   assert.equal((await done).code, 7);
+});
+
+test("uses the image-pinned onboarding module ahead of a stale CLI on PATH", { timeout: 5000 }, async (t) => {
+  const { done } = launch(t, "console.log('PINNED ONBOARDING');", { pinned: true });
+  const result = await done;
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /PINNED ONBOARDING/);
 });
 
 test("reports an asynchronous CLI failure without treating it as completed setup", { timeout: 5000 }, async (t) => {

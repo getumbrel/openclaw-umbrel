@@ -19,7 +19,7 @@ RUN mkdir -p /data && chown node:node /data
 # Install OpenClaw globally from npm. Keep npm lifecycle-generated OpenClaw
 # state out of the runtime home so startup derives state from the installed
 # version and the user's persisted configuration.
-RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.10.3 \
+RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.10.5 \
     && rm -rf /tmp/openclaw-install-state /data/.openclaw
 
 # Redirect future npm global installs to persistent volume
@@ -63,13 +63,14 @@ COPY --chown=node:node onboard.cjs /app/onboard.cjs
 COPY --chown=node:node setup.html /app/setup.html
 COPY --chown=node:node logo.webp /app/logo.webp
 COPY openclaw-context /app/openclaw-context
+COPY --chmod=755 bin/openclaw /app/bin/openclaw
 
 # Move home to skeleton
 RUN sudo mv /data /home-skeleton
 RUN sudo mv /home/linuxbrew /home-skeleton/linuxbrew
 
 # Setup PATH
-ENV PATH="/data/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+ENV PATH="/app/bin:/data/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 # Run the setup/proxy server
 CMD ["node", "/app/setup-server.cjs"]

@@ -26,6 +26,7 @@ const GATEWAY_CONFIG_EXIT_CODE = 78;
 const GATEWAY_STABLE_RUN_MS = 60_000;
 const GATEWAY_MAX_RESTART_DELAY_MS = 30_000;
 const MAINTENANCE_TIMEOUT_MS = 5 * 60_000;
+const OPENCLAW_CLI = "/usr/local/lib/node_modules/openclaw/openclaw.mjs";
 
 // Keep OpenClaw and the wrapper on the same state root even when an older
 // deployment still supplies the wrapper-specific OPENCLAW_DATA_DIR override.
@@ -59,7 +60,11 @@ function getOpenClawEnv() {
     OPENCLAW_SERVICE_REPAIR_POLICY: "external",
     OPENCLAW_SUPERVISOR_MODE: "external",
     OPENCLAW_NO_RESPAWN: "1",
+    UMBREL_OPENCLAW_CLI: OPENCLAW_CLI,
   };
+  // Persisted npm packages may include an older OpenClaw. Wrapper and agent
+  // CLI calls must use the runtime belonging to this image.
+  env.PATH = `/app/bin:${env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
   // Trusted-proxy mode rejects a shared token, including inherited overrides.
   delete env.OPENCLAW_GATEWAY_TOKEN;
   const password = resolveGatewaySecretValue(readConfig()?.gateway?.auth?.password, env);
@@ -511,7 +516,7 @@ function reconcileConfig() {
 // so running Doctor on every ordinary restart is redundant and slow.
 async function runDoctor() {
   try {
-    await execFileAsync("openclaw", ["doctor", "--repair", "--yes", "--non-interactive"], {
+    await execFileAsync(process.execPath, [OPENCLAW_CLI, "doctor", "--repair", "--yes", "--non-interactive"], {
       env: getOpenClawEnv(),
       timeout: MAINTENANCE_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
@@ -530,8 +535,8 @@ async function runDoctor() {
 async function refreshPluginRegistry() {
   try {
     await execFileAsync(
-      "openclaw",
-      ["plugins", "registry", "--refresh", "--json"],
+      process.execPath,
+      [OPENCLAW_CLI, "plugins", "registry", "--refresh", "--json"],
       {
         env: getOpenClawEnv(),
         timeout: MAINTENANCE_TIMEOUT_MS,
@@ -679,8 +684,8 @@ function spawnGateway() {
   gatewayFailure = null;
   console.log("Starting OpenClaw gateway...");
   const child = spawn(
-    "openclaw",
-    ["gateway", "--port", OPENCLAW_PORT.toString()],
+    process.execPath,
+    [OPENCLAW_CLI, "gateway", "--port", OPENCLAW_PORT.toString()],
     {
       stdio: "inherit",
       env: getOpenClawEnv(),
