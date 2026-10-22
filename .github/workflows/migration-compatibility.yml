@@ -1,4 +1,4 @@
-name: OpenClaw migration compatibility
+name: OpenClaw upgrade compatibility
 
 on:
   pull_request:
@@ -6,8 +6,6 @@ on:
       - Dockerfile
       - server.cjs
       - onboard.cjs
-      - upgrade*
-      - migration-offline.c
       - bin/**
       - package*.json
       - openclaw-context/**
@@ -19,37 +17,30 @@ permissions:
   contents: read
 
 jobs:
-  migration-matrix:
+  recent-upgrades:
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24.16.0'
-      - name: Exercise pinned bridge and candidate packages
-        id: migrations
-        run: npm run test:migrations
       - name: Install wrapper test dependencies
         run: npm ci
-      - name: Verify production upgrade and container recovery
+      - name: Wrapper unit tests
+        run: npm test
+      - name: Verify recent Store upgrades and fresh installation
         id: upgrades
         run: npm run test:upgrades
-      - name: Upgrade data prepared by publicly shipped releases
-        id: shipped
-        run: npm run test:shipped-upgrades
-      - name: Preserve compatibility matrix and Doctor logs
-        if: always() && steps.migrations.outputs.report-dir != ''
+      - name: Preserve upgrade results and container logs
+        if: always() && steps.upgrades.outputs.report-dir != ''
         uses: actions/upload-artifact@v4
         with:
-          name: migration-evidence-${{ matrix.runner }}
-          path: |
-            ${{ steps.migrations.outputs.report-dir }}
-            ${{ steps.upgrades.outputs.report-dir }}
-            ${{ steps.shipped.outputs.report-dir }}
+          name: upgrade-evidence-${{ matrix.runner }}
+          path: ${{ steps.upgrades.outputs.report-dir }}
           include-hidden-files: true
           retention-days: 14

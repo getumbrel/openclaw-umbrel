@@ -4,7 +4,7 @@
 FROM node:24.16.0-trixie-slim
 
 # Install global deps
-RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential python3 procps util-linux file chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential python3 procps file chromium && rm -rf /var/lib/apt/lists/*
 
 # Set home directory
 ENV HOME=/data
@@ -12,16 +12,14 @@ ENV OPENCLAW_STATE_DIR=/data/.openclaw \
     OPENCLAW_SERVICE_REPAIR_POLICY=external \
     OPENCLAW_SUPERVISOR_MODE=external \
     OPENCLAW_NO_RESPAWN=1 \
-    NODE_COMPILE_CACHE=/tmp/openclaw-node-compile
+    NODE_COMPILE_CACHE=/data/.cache/node-compile
 WORKDIR /data
 RUN mkdir -p /data && chown node:node /data
 
 # Install OpenClaw globally from npm. Keep npm lifecycle-generated OpenClaw
 # state out of the runtime home so startup derives state from the installed
 # version and the user's persisted configuration.
-RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g --prefix /opt/openclaw-bridges/2026.9.5 openclaw@2026.9.5 \
-    && OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g --prefix /opt/openclaw-bridges/2026.9.7 openclaw@2026.9.7 \
-    && OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.10.5 \
+RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.10.5 \
     && rm -rf /tmp/openclaw-install-state /data/.openclaw
 
 # Redirect future npm global installs to persistent volume
@@ -30,10 +28,6 @@ ENV NPM_CONFIG_PREFIX=/data/.npm-global
 # Install setup server dependencies (node-pty needs build tools, do this as root)
 COPY package.json package-lock.json /app/
 RUN cd /app && npm ci --omit=dev && chown -R node:node /data
-COPY migration-offline.c /tmp/migration-offline.c
-RUN mkdir -p /usr/local/libexec \
-    && cc -O2 -Wall -Wextra -Werror /tmp/migration-offline.c -o /usr/local/libexec/openclaw-migration-offline \
-    && rm /tmp/migration-offline.c
 
 # Switch to non-root user
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
@@ -66,7 +60,6 @@ RUN printf '#!/bin/bash\necho "Error: apt is not available. Please use brew inst
 # runtime edits are disposable and image updates overwrite the managed context.
 COPY --chown=node:node server.cjs /app/setup-server.cjs
 COPY --chown=node:node onboard.cjs /app/onboard.cjs
-COPY --chown=node:node upgrade.cjs upgrade-storage.cjs upgrade-auth.cjs upgrade-runtime.mjs upgrade-worker.cjs /app/
 COPY --chown=node:node setup.html /app/setup.html
 COPY --chown=node:node logo.webp /app/logo.webp
 COPY openclaw-context /app/openclaw-context

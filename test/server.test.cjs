@@ -8,7 +8,9 @@ const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-wrapper-test-")
 const configFile = path.join(stateDir, "openclaw.json");
 const envFile = path.join(stateDir, ".env");
 process.env.OPENCLAW_STATE_DIR = stateDir;
-const { reconcileConfig, getOpenClawEnv, getGatewayProxyHeaders, isAllowedBrowserRequest } = require("../server.cjs");
+// The production image installs this file as setup-server.cjs.
+const serverModule = fs.existsSync(path.join(__dirname, "../server.cjs")) ? "../server.cjs" : "../setup-server.cjs";
+const { reconcileConfig, getOpenClawEnv, getGatewayProxyHeaders, isAllowedBrowserRequest } = require(serverModule);
 
 beforeEach(() => {
   fs.writeFileSync(configFile, JSON.stringify({ wizard: { lastRunVersion: "2026.7.1-2" } }));
@@ -73,11 +75,13 @@ test("preserves env-backed passwords without stale overrides or losing provider 
 });
 
 test("enforces supervisor environment even when the persisted environment overrides it", () => {
-  fs.writeFileSync(envFile, "OPENCLAW_SUPERVISOR_MODE=native\nOPENCLAW_SERVICE_REPAIR_POLICY=auto\nOPENCLAW_NO_RESPAWN=0\nOPENCLAW_STATE_DIR=/elsewhere\nOPENCLAW_GATEWAY_TOKEN=old-token\n");
+  fs.writeFileSync(envFile, "OPENCLAW_SUPERVISOR_MODE=native\nOPENCLAW_SERVICE_REPAIR_POLICY=auto\nOPENCLAW_NO_RESPAWN=0\nOPENCLAW_STATE_DIR=/elsewhere\nOPENCLAW_GATEWAY_TOKEN=old-token\nUMBREL_OPENCLAW_CLI=/stale/openclaw.mjs\nPATH=/stale/bin\n");
   const env = getOpenClawEnv();
   assert.equal(env.OPENCLAW_SUPERVISOR_MODE, "external");
   assert.equal(env.OPENCLAW_SERVICE_REPAIR_POLICY, "external");
   assert.equal(env.OPENCLAW_NO_RESPAWN, "1");
+  assert.equal(env.UMBREL_OPENCLAW_CLI, "/usr/local/lib/node_modules/openclaw/openclaw.mjs");
+  assert.equal(env.PATH.split(path.delimiter)[0], "/app/bin");
   assert.equal(env.OPENCLAW_STATE_DIR, stateDir);
   assert.equal(env.OPENCLAW_GATEWAY_TOKEN, undefined);
 });

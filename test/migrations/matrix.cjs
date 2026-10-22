@@ -161,9 +161,9 @@ async function main() {
   const selected = process.env.MIGRATION_CASES?.split(",");
   if (selected) for (const id of selected) assert.ok(cases.some(c => c.id === id), `unknown case ${id}`);
   const report = {
-    versions, architecture: process.arch, node: process.version, cases: [], productionReady: false,
-    scope: "Doctor-only synthetic evidence; production orchestration is exercised separately by npm run test:upgrades",
-    notExercisedByThisSuite: ["channel/plugin-specific state including Matrix", "queued messages and media", "multiple agents and custom workspaces", "storage and permission failures", "production migration orchestration and Gateway readiness"],
+    versions, architecture: process.arch, node: process.version, cases: [],
+    scope: "Optional historical Doctor investigation; recent-version release qualification uses npm run test:upgrades",
+    notExercisedByThisSuite: ["channel/plugin-specific state including Matrix", "queued messages and media", "multiple agents and custom workspaces", "storage and permission failures", "production wrapper startup and Gateway readiness"],
   };
   // Doctor performs process discovery and maintenance. Run one case at a time
   // in this PID namespace, even though each case has a separate home.
