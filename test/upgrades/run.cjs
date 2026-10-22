@@ -75,8 +75,10 @@ function start(name, volume) {
   names.add(name);
   docker(["run", "-d", "--init", "--restart", "on-failure", "--stop-timeout", "60", "--name", name, "--network", network, ...env, ...mounts(volume), "--mount", `type=volume,src=${volume},dst=/home/linuxbrew,volume-subpath=linuxbrew`, candidate]);
 }
-function verify(name, fresh) {
-  return JSON.parse(docker(["exec", name, "node", "/tests/upgrades/fixture.cjs", fresh ? "fresh-verify" : "verify"]));
+function verify(volume, fresh) {
+  // Inspect persisted records only after the Gateway has released its database
+  // handles. Live checks above use the public HTTP/WebSocket surfaces instead.
+  return JSON.parse(docker(["run", "--rm", "--init", "--network", "none", ...env, ...mounts(volume), "--mount", `type=volume,src=${volume},dst=/home/linuxbrew,volume-subpath=linuxbrew`, candidate, "node", "/tests/upgrades/fixture.cjs", fresh ? "fresh-verify" : "verify"]));
 }
 async function scenario(version) {
   const fresh = version === "fresh", name = `openclaw-${version.replaceAll(".", "-")}-${id}`, volume = `${name}-data`;
@@ -109,14 +111,16 @@ async function scenario(version) {
       row.onboarding = true;
     }
     await ready(url);
-    row.beforeRestart = verify(name, fresh);
     assert.match(docker(["exec", name, "openclaw", "--version"]), new RegExp(`OpenClaw ${target.replaceAll(".", "\\.")}(?:\\s|$)`));
     row.pinnedCli = true;
     logged(["exec", "-e", `OPENCLAW_TEST_URL=${url}`, client, "node", "/app/test/gateway-compatibility.cjs"], `${version}-gateway.log`, 120000);
     row.gatewayAuthentication = true;
     capture(name, "-before-restart");
-    docker(["restart", name]); await ready(url);
-    row.afterRestart = verify(name, fresh);
+    docker(["stop", name]);
+    row.beforeRestart = verify(volume, fresh);
+    docker(["start", name]); await ready(url);
+    docker(["stop", name]);
+    row.afterRestart = verify(volume, fresh);
     row.passed = true;
     console.log(`PASS ${version}: ${fresh ? "setup and onboarding" : "retained core data"}, Gateway authentication, restart`);
   } finally { remove(name, volume); }

@@ -110,6 +110,8 @@ The checks cover conversation history, saved automation, Voice Wake, API-key and
 inline OAuth profiles, workspace/settings preservation, SQLite integrity,
 Gateway readiness, wrapper authentication and restart. A separate fresh volume
 covers the setup page, upstream non-interactive onboarding, readiness and restart.
+Persisted records are inspected with the Gateway stopped before and after the
+restart; live readiness and authentication checks use HTTP and WebSocket APIs.
 A pinned upstream Codex runtime is installed in that volume before introducing
 synthetic credentials, so OpenAI onboarding can run without external access.
 A retired-cron fixture checks that upstream refusal preserves its source data.
