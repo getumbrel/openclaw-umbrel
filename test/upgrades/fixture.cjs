@@ -82,15 +82,17 @@ if (operation === "seed") {
   assert.equal(fs.existsSync(path.join(home, ".umbrel-upgrades")), false, "no custom migration journal or full-home backup");
   console.log(JSON.stringify({ passed: true, schemas: schemas(state) }));
 } else if (operation === "refusal") {
-  // Upstream's retired-input guard must remain effective and retain source data.
-  f.createHome(home); f.addLegacy(state, "cron");
-  const file = path.join(state, "cron/jobs.json"), before = fs.readFileSync(file);
+  // Pre-June config is retired on both extended-stable and the October line.
+  // Cron JSON is still supported by extended-stable, so it is not a refusal fixture.
+  f.createHome(home); f.addLegacy(state, "config");
+  const file = path.join(state, "openclaw.json"), before = fs.readFileSync(file);
   const result = doctor();
   assert.equal(result.error, undefined);
   assert.notEqual(result.status, 0);
-  assert.match(result.stdout + result.stderr, /Upgrade through OpenClaw 2026\.9\.7/);
+  assert.match(result.stdout + result.stderr, /retired pre-June keys/);
+  assert.match(result.stdout + result.stderr, /Install OpenClaw 2026\.9\.5/);
   assert.deepEqual(fs.readFileSync(file), before);
-  console.log("PASS: upstream refuses retired cron without changing its bytes");
+  console.log("PASS: upstream refuses retired config without changing its bytes");
 } else if (operation === "fresh-verify") {
   assert.equal(fs.existsSync(path.join(home, ".umbrel-upgrades")), false);
   const config = JSON.parse(fs.readFileSync(path.join(state, "openclaw.json")));

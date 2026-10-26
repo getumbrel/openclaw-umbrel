@@ -55,11 +55,11 @@ and cross-origin request rejection. They do not call an AI provider.
 
 ### Migration compatibility lab
 
-Run `npm run test:migrations` with Docker available to test the OpenClaw version
-pinned in the production Dockerfile. To investigate another exact release:
+The optional historical lab records the migration expectations investigated for
+`2026.10.5`. Run that investigation with Docker available:
 
 ```sh
-OPENCLAW_MIGRATION_TARGET=2026.9.34 npm run test:migrations
+OPENCLAW_MIGRATION_TARGET=2026.10.5 npm run test:migrations
 ```
 
 The lab builds a separate image containing the candidate and pinned `2026.9.5`,
@@ -79,17 +79,17 @@ that includes committed SQLite WAL data. Verification reads persisted records
 and checks database integrity; a successful Doctor exit alone is insufficient.
 
 The Doctor matrix records expected refusals as well as working migration paths;
-passing that matrix alone does not establish release readiness. This is an
-optional investigation lab, separate from the release qualification below.
-Upstream's [migration retention policy](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/gateway/doctor/config-migrations.md#retention-policy)
-and [intermediate-release guidance](https://github.com/openclaw/openclaw/blob/v2026.10.5/docs/install/updating.md#upgrading-very-old-versions)
-describe the historical formats that need intermediate releases. Those recovery
+passing that matrix alone does not establish release readiness. Expectations can
+differ between release lines; this lab is separate from the release qualification
+below. Upstream's [extended-stable migration guidance](https://github.com/openclaw/openclaw/blob/v2026.9.34/docs/cli/doctor/state-migrations.md)
+and [intermediate-release guidance](https://github.com/openclaw/openclaw/blob/v2026.9.34/docs/install/updating.md#upgrading-very-old-versions)
+describe historical formats that need intermediate releases. Those recovery
 routes are not implemented by the Umbrel wrapper.
 
 ### Upgrade support and release qualification
 
-For the `2026.9.34` extended-stable update, the release matrix covers the three most recent
-public App Store versions: `2026.9.2`, `2026.9.4` and `2026.9.8`, plus a fresh
+For the `2026.9.34` extended-stable update, the release matrix covers the three
+most recent public App Store versions: `2026.9.2`, `2026.9.4` and `2026.9.8`, plus a fresh
 installation. This assumes an installation has completed normal upstream
 migrations on a recent release. A recent version number alone does not prove
 that disabled plugins or imported data have current formats.
@@ -114,7 +114,7 @@ Persisted records are inspected with the Gateway stopped before and after the
 restart; live readiness and authentication checks use HTTP and WebSocket APIs.
 A pinned upstream Codex runtime is installed in that volume before introducing
 synthetic credentials, so OpenAI onboarding can run without external access.
-A retired-cron fixture checks that upstream refusal preserves its source data.
+A retired-config fixture checks that upstream refusal preserves its source data.
 Neither the preparation nor verification runs custom production migration code.
 Use `UPGRADE_CASES=fresh` or a comma-separated list of supported versions for a
 focused investigation; subset reports do not count as complete qualification.
