@@ -1,7 +1,7 @@
 # OpenClaw Docker Image for Umbrel
 # Self-hosted personal AI assistant with web-based setup
 
-FROM node:24.16.0-trixie-slim
+FROM node:24.22.1-trixie-slim
 
 # Install global deps
 RUN apt-get update && apt-get install -y --no-install-recommends sudo ca-certificates curl git build-essential python3 procps file chromium && rm -rf /var/lib/apt/lists/*
@@ -19,7 +19,7 @@ RUN mkdir -p /data && chown node:node /data
 # Install OpenClaw globally from npm. Keep npm lifecycle-generated OpenClaw
 # state out of the runtime home so startup derives state from the installed
 # version and the user's persisted configuration.
-RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.10.5 \
+RUN OPENCLAW_STATE_DIR=/tmp/openclaw-install-state npm install -g openclaw@2026.9.34 \
     && rm -rf /tmp/openclaw-install-state /data/.openclaw
 
 # Redirect future npm global installs to persistent volume

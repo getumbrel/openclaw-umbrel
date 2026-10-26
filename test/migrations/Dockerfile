@@ -1,4 +1,4 @@
-FROM node:24.16.0-trixie-slim
+FROM node:24.22.1-trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git python3 make g++ procps util-linux \
