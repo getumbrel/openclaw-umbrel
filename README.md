@@ -59,7 +59,7 @@ Run `npm run test:migrations` with Docker available to test the OpenClaw version
 pinned in the production Dockerfile. To investigate another exact release:
 
 ```sh
-OPENCLAW_MIGRATION_TARGET=2026.10.5 npm run test:migrations
+OPENCLAW_MIGRATION_TARGET=2026.9.34 npm run test:migrations
 ```
 
 The lab builds a separate image containing the candidate and pinned `2026.9.5`,
@@ -88,7 +88,7 @@ routes are not implemented by the Umbrel wrapper.
 
 ### Upgrade support and release qualification
 
-For the `2026.10.5` update, the release matrix covers the three most recent
+For the `2026.9.34` extended-stable update, the release matrix covers the three most recent
 public App Store versions: `2026.9.2`, `2026.9.4` and `2026.9.8`, plus a fresh
 installation. This assumes an installation has completed normal upstream
 migrations on a recent release. A recent version number alone does not prove
