@@ -88,8 +88,8 @@ routes are not implemented by the Umbrel wrapper.
 
 ### Upgrade support and release qualification
 
-For the `2026.9.34` extended-stable update, the release matrix covers the three
-most recent public App Store versions: `2026.9.2`, `2026.9.4` and `2026.9.8`, plus a fresh
+For the `2026.10.10` stable update, the release matrix covers the three
+most recent public App Store versions: `2026.9.4`, `2026.9.8` and `2026.9.34`, plus a fresh
 installation. This assumes an installation has completed normal upstream
 migrations on a recent release. A recent version number alone does not prove
 that disabled plugins or imported data have current formats.

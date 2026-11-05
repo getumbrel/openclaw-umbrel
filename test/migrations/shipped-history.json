@@ -1,8 +1,8 @@
 {
   "repository": "getumbrel/umbrel-apps",
   "path": "openclaw",
-  "auditedThrough": "f3e41f444ad3e7a0edffebca7e14fd7a2caf78e7",
-  "commitCount": 45,
+  "auditedThrough": "bd97534a67b3cde9c479a0cd23556bf352a0b5d5",
+  "commitCount": 47,
   "releases": [
     {
       "appVersion": "2026.2.1",
@@ -275,6 +275,13 @@
       "commit": "f3e41f444ad3e7a0edffebca7e14fd7a2caf78e7",
       "mergedAt": "2026-10-03T13:34:28Z",
       "upstreamVersion": "2026.9.8"
+    },
+    {
+      "appVersion": "2026.9.34",
+      "image": "ghcr.io/getumbrel/openclaw-umbrel:2026.9.34@sha256:738340444a4d1c05ea79175f56a2c0b5607a316a6dc8ea9fd5c8dd36d734534a",
+      "commit": "252788d75c6a49e516eec6336c4531f0ed80c518",
+      "mergedAt": "2026-10-26T02:20:13Z",
+      "upstreamVersion": "2026.9.34"
     }
   ]
 }
