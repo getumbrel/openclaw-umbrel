@@ -82,16 +82,16 @@ if (operation === "seed") {
   assert.equal(fs.existsSync(path.join(home, ".umbrel-upgrades")), false, "no custom migration journal or full-home backup");
   console.log(JSON.stringify({ passed: true, schemas: schemas(state) }));
 } else if (operation === "refusal") {
-  // Pre-June config is retired on both extended-stable and the October line.
-  // Cron JSON is still supported by extended-stable, so it is not a refusal fixture.
+  // The retired top-level heartbeat setting must be refused without rewriting
+  // the input. Cron JSON is still supported by extended-stable, so avoid it here.
   f.createHome(home); f.addLegacy(state, "config");
   const file = path.join(state, "openclaw.json"), before = fs.readFileSync(file);
   const result = doctor();
   assert.equal(result.error, undefined);
   assert.notEqual(result.status, 0);
-  assert.match(result.stdout + result.stderr, /retired pre-June keys/);
-  assert.match(result.stdout + result.stderr, /Install OpenClaw 2026\.9\.5/);
   assert.deepEqual(fs.readFileSync(file), before);
+  assert.match(result.stdout + result.stderr, /Config contains retired [^\n]*\bheartbeat\b/);
+  assert.match(result.stdout + result.stderr, /Install OpenClaw 2026\.9\.5/);
   console.log("PASS: upstream refuses retired config without changing its bytes");
 } else if (operation === "fresh-verify") {
   assert.equal(fs.existsSync(path.join(home, ".umbrel-upgrades")), false);
