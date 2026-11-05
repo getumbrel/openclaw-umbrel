@@ -8,7 +8,7 @@ const { randomUUID } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const history = require("../migrations/shipped-history.json");
 const repo = path.resolve(__dirname, "../..");
-const versions = ["2026.9.2", "2026.9.4", "2026.9.8"];
+const versions = ["2026.9.4", "2026.9.8", "2026.9.34"];
 const required = [...versions, "fresh"];
 const selected = process.env.UPGRADE_CASES?.split(",") || required;
 if (!selected.length || new Set(selected).size !== selected.length || selected.some(c => !required.includes(c))) throw new Error("UPGRADE_CASES must select distinct recent versions or fresh");
