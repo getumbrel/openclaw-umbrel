@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { zstdDecompressSync } = require("node:zlib");
 const f = require("../migrations/fixtures.cjs");
 const { schemas, readTables, database } = require("../migrations/lab.cjs");
@@ -13,6 +13,7 @@ const operation = process.argv[2];
 const oauth = { type: "oauth", provider: "openai", access: "synthetic-recent-access", refresh: "synthetic-recent-refresh", expires: 4102444800000, accountId: "recent-account", email: "recent@example.invalid" };
 const brewMarker = "Retain Homebrew data across image replacement.\n";
 const workspaceMarker = "Keep this user's workspace.\n";
+const jobReceipt = path.join(home, "upgrade-fixture-job.json");
 function doctor() {
   return spawnSync(process.execPath, [path.join(root, "openclaw.mjs"), "doctor", "--repair", "--yes", "--non-interactive"], {
     encoding: "utf8", timeout: 180000, maxBuffer: 8 * 1024 * 1024,
@@ -20,11 +21,12 @@ function doctor() {
   });
 }
 function verify() {
+  const expectedJob = JSON.parse(fs.readFileSync(jobReceipt));
   database(state, db => {
-    const jobs = db.prepare("SELECT job_json FROM cron_jobs WHERE job_id = ?").all(f.job.id);
+    const jobs = db.prepare("SELECT job_json FROM cron_jobs WHERE job_id = ?").all(expectedJob.id);
     assert.equal(jobs.length, 1, "one retained automation");
     const actual = JSON.parse(jobs[0].job_json);
-    for (const key of ["id", "name", "enabled", "schedule", "payload"]) assert.deepEqual(actual[key], f.job[key], `automation ${key}`);
+    for (const key of ["id", "name", "enabled", "schedule", "payload"]) assert.deepEqual(actual[key], expectedJob[key], `automation ${key}`);
     const voice = db.prepare("SELECT value_json FROM config_machine_state WHERE state_key = 'voicewake.triggers'").get();
     assert.deepEqual(JSON.parse(voice.value_json), f.voicewake.triggers);
   });
@@ -49,7 +51,63 @@ function verify() {
   assert.equal(fs.readFileSync(path.join(home, "linuxbrew/retained.txt"), "utf8"), brewMarker);
   for (const db of Object.values(schemas(state))) assert.deepEqual(db.integrity, ["ok"]);
 }
-if (operation === "seed") {
+
+async function seedGatewayState() {
+  // Current Store releases refuse pre-July cron and Voice Wake JSON. Create
+  // these records through the source image's own Gateway instead of injecting
+  // retired input or writing its SQLite schema ourselves.
+  const gateway = spawn(process.execPath, [path.join(root, "openclaw.mjs"), "gateway", "--port", "18790"], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  let closed = false;
+  const stopped = new Promise((resolve, reject) => {
+    gateway.once("error", error => { closed = true; reject(error); });
+    gateway.once("close", (code, signal) => { closed = true; resolve({ code, signal }); });
+  });
+  // Keep a spawn failure handled while readiness is being checked.
+  stopped.catch(() => {});
+  try {
+    const deadline = Date.now() + 120000;
+    let ready = false;
+    while (!closed && Date.now() < deadline) {
+      try {
+        const response = await fetch("http://127.0.0.1:18790/readyz", { signal: AbortSignal.timeout(2000) });
+        await response.body?.cancel();
+        if (response.ok) { ready = true; break; }
+      } catch {}
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    assert.ok(ready, "published image's Gateway must become ready for fixture preparation");
+    function call(method, params) {
+      const result = spawnSync(process.execPath, [path.join(root, "openclaw.mjs"), "gateway", "call", method,
+        "--url", "ws://127.0.0.1:18790", "--password", "synthetic-migration-test-only",
+        "--params", JSON.stringify(params), "--json"], {
+        encoding: "utf8", timeout: 30000, env: process.env,
+      });
+      process.stdout.write(result.stdout || ""); process.stderr.write(result.stderr || "");
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, `source Gateway must complete ${method}`);
+      return JSON.parse(result.stdout);
+    }
+    call("voicewake.set", { triggers: f.voicewake.triggers });
+    const params = Object.fromEntries(["name", "enabled", "agentId", "schedule", "sessionTarget", "wakeMode", "payload"].map(key => [key, f.job[key]]));
+    const job = call("cron.add", params);
+    assert.equal(typeof job.id, "string");
+    // Preserve the source-assigned ID, while checking requested contents rather
+    // than accepting any record returned by the source as the expected fixture.
+    fs.writeFileSync(jobReceipt, JSON.stringify({ ...f.job, id: job.id }), { mode: 0o600 });
+  } finally {
+    if (!closed) gateway.kill("SIGTERM");
+    const timer = setTimeout(() => gateway.kill("SIGKILL"), 60000);
+    try {
+      const result = await stopped;
+      assert.equal(result.code, 0, `source Gateway must close cleanly (${result.signal || "exit"})`);
+    } finally { clearTimeout(timer); }
+  }
+}
+
+async function seed() {
   const [version, expected, image] = process.argv.slice(3);
   const actual = JSON.parse(fs.readFileSync(path.join(root, "package.json"))).version;
   assert.equal(actual, expected);
@@ -58,7 +116,7 @@ if (operation === "seed") {
   const config = JSON.parse(fs.readFileSync(configFile));
   config.agents = { defaults: { workspace: path.join(state, "workspace") } };
   fs.writeFileSync(configFile, JSON.stringify(config));
-  f.addLegacy(state, "cron"); f.addLegacy(state, "voicewake"); f.addHistoryAndCredentials(state);
+  f.addHistoryAndCredentials(state);
   const authFile = path.join(state, "agents/main/agent/auth-profiles.json");
   const auth = JSON.parse(fs.readFileSync(authFile));
   auth.profiles["openai:recent-oauth"] = oauth;
@@ -69,13 +127,17 @@ if (operation === "seed") {
   process.stdout.write(result.stdout || ""); process.stderr.write(result.stderr || "");
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, "published image's Doctor must complete preparation");
+  await seedGatewayState();
   verify();
-  for (const file of ["cron/jobs.json", "settings/voicewake.json"]) assert.equal(fs.existsSync(path.join(state, file)), false, "source must have completed its ordinary migrations");
+  for (const file of ["cron/jobs.json", "settings/voicewake.json"]) assert.equal(fs.existsSync(path.join(state, file)), false, "source fixture must contain no retired cron or Voice Wake JSON");
   // A stale persistent npm binary must not shadow the candidate's pinned CLI.
   const stale = path.join(home, ".npm-global/bin/openclaw");
   fs.mkdirSync(path.dirname(stale), { recursive: true });
   fs.writeFileSync(stale, "#!/bin/sh\necho stale-openclaw-was-used >&2\nexit 97\n", { mode: 0o755 });
-  fs.writeFileSync(`/results/source-${version}.json`, JSON.stringify({ appVersion: version, package: actual, image, architecture: process.arch, node: process.version, schemas: schemas(state) }, null, 2));
+  fs.writeFileSync(`/results/source-${version}.json`, JSON.stringify({ appVersion: version, package: actual, image, architecture: process.arch, node: process.version, cronAndVoiceWakePreparation: "source-gateway-rpc", schemas: schemas(state) }, null, 2));
+}
+if (operation === "seed") {
+  seed().catch(error => { console.error(error); process.exitCode = 1; });
 } else if (operation === "verify") {
   verify();
   assert.equal(fs.readFileSync("/home/linuxbrew/retained.txt", "utf8"), brewMarker, "second Homebrew mount remains usable");

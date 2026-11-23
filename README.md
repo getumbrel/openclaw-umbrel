@@ -89,8 +89,8 @@ routes are not implemented by the Umbrel wrapper.
 ### Upgrade support and release qualification
 
 The release matrix covers the three newest versions in the public App Store
-image inventory, plus a fresh installation. For the `2026.11.4` update, the
-upgrade sources are `2026.9.8`, `2026.9.34` and `2026.9.36`. This assumes an installation
+image inventory, plus a fresh installation. For the `2026.11.7` update, the
+upgrade sources are `2026.9.34`, `2026.9.36` and `2026.11.4`. This assumes an installation
 has completed normal upstream migrations on a recent release. A recent version number alone does not prove
 that disabled plugins or imported data have current formats.
 
@@ -110,7 +110,8 @@ New tasks record the account when created.
 
 Run `npm run test:upgrades` with Docker available. It builds the production
 image, prepares synthetic records with each digest-pinned published image's own
-Node and Doctor, then starts the normal candidate wrapper on the same volume.
+Node and Doctor, saves automation and Voice Wake settings through that source Gateway's RPC,
+then starts the normal candidate wrapper on the same volume.
 The checks cover conversation history, saved automation, Voice Wake, API-key and
 inline OAuth profiles, workspace/settings preservation, SQLite integrity,
 Gateway readiness, wrapper authentication and restart. A separate fresh volume
