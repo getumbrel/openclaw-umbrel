@@ -89,8 +89,8 @@ routes are not implemented by the Umbrel wrapper.
 ### Upgrade support and release qualification
 
 The release matrix covers the three newest versions in the public App Store
-image inventory, plus a fresh installation. For the `2026.11.7` update, the
-upgrade sources are `2026.9.34`, `2026.9.36` and `2026.11.4`. This assumes an installation
+image inventory, plus a fresh installation. For the `2026.11.10` update, the
+upgrade sources are `2026.9.36`, `2026.11.4` and `2026.11.7`. This assumes an installation
 has completed normal upstream migrations on a recent release. A recent version number alone does not prove
 that disabled plugins or imported data have current formats.
 
