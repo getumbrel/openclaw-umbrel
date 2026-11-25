@@ -89,8 +89,8 @@ routes are not implemented by the Umbrel wrapper.
 ### Upgrade support and release qualification
 
 The release matrix covers the three newest versions in the public App Store
-image inventory, plus a fresh installation. For the `2026.11.7` update, the
-upgrade sources are `2026.9.34`, `2026.9.36` and `2026.11.4`. This assumes an installation
+image inventory, plus a fresh installation. For the `2026.11.10` update, the
+upgrade sources are `2026.9.36`, `2026.11.4` and `2026.11.7`. This assumes an installation
 has completed normal upstream migrations on a recent release. A recent version number alone does not prove
 that disabled plugins or imported data have current formats.
 
@@ -118,7 +118,7 @@ Gateway readiness, wrapper authentication and restart. A separate fresh volume
 covers the setup page, upstream non-interactive onboarding, readiness and restart.
 Persisted records are inspected with the Gateway stopped before and after the
 restart; live readiness and authentication checks use HTTP and WebSocket APIs.
-A pinned upstream Codex runtime is installed in that volume before introducing
+A pinned upstream Codex runtime is installed from npm in that volume before introducing
 synthetic credentials, so OpenAI onboarding can run without external access.
 A retired-config fixture checks that upstream refusal preserves its source data.
 Neither the preparation nor verification runs custom production migration code.
