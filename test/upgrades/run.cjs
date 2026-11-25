@@ -87,9 +87,10 @@ async function scenario(version) {
   try {
     if (fresh) {
       // OpenAI onboarding installs this upstream runtime. Install the pinned
-      // real dependency before adding any credentials, then isolate onboarding
+      // real npm dependency explicitly (bare specs resolve through ClawHub)
+      // before adding any credentials, then isolate onboarding
       // and Gateway traffic from external services for the rest of the test.
-      logged(["run", "--rm", "--init", ...env, ...mounts(volume), candidate, "openclaw", "plugins", "install", `@openclaw/codex@${target}`], "fresh-runtime-install.log", 600000);
+      logged(["run", "--rm", "--init", ...env, ...mounts(volume), candidate, "openclaw", "plugins", "install", `npm:@openclaw/codex@${target}`], "fresh-runtime-install.log", 600000);
       row.runtimeDependency = `@openclaw/codex@${target}`;
     } else {
       const release = history.releases.find(r => r.appVersion === version);
